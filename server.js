@@ -1,0 +1,733 @@
+import express from 'express';
+import cors from 'cors';
+import { supabase, supabaseAdmin, signUpWithEmail, signInWithEmail, signInWithGoogle, signOut, getCurrentUser, getSession, refreshSession } from './supabaseClient.js';
+import { calculateLifestyleScore } from './lifestyleScore.js';
+import { getDailyMissions, saveDailyMissions, getDailyMissionStats, getTodayDailyMissions, checkMissionsCompleted } from './dailyMissions.js';
+import { getUserProgress, saveUserProgress, getProgressStats, getTodayProgress, checkAndSaveDailyProgress } from './progress.js';
+import { 
+  createSubscriptionCheckout, 
+  createCustomerPortalSession, 
+  getSubscriptionStatus, 
+  cancelSubscription, 
+  reactivateSubscription,
+  handleWebhookEvent 
+} from './subscriptionService.js';
+import { requireSubscription, checkSubscription } from './subscriptionMiddleware.js';
+import { stripe } from './stripeConfig.js';
+
+const app = express();
+
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  exposedHeaders: ['Authorization'],
+  credentials: true
+}));
+
+app.use(express.json());
+
+const authenticateToken = async (req, res, next) => {
+  try {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+
+    if (!token) {
+      return res.status(401).json({ error: 'No token provided' });
+    }
+
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    
+    if (error || !user) {
+      return res.status(401).json({ error: 'Invalid token' });
+    }
+
+    req.user = user;
+    next();
+  } catch (error) {
+    console.error('Auth middleware error:', error);
+    res.status(401).json({ error: 'Authentication failed' });
+  }
+};
+
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+  if (req.body && Object.keys(req.body).length > 0) {
+    console.log('Request body:', {
+      ...req.body,
+      password: req.body.password ? '[REDACTED]' : undefined
+    });
+  }
+  next();
+});
+
+app.use((err, req, res, next) => {
+  console.error('Server error:', err.stack);
+  res.status(500).json({ error: 'Something went wrong!' });
+});
+
+app.post('/auth/signup', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      console.log('Signup failed: Missing email or password');
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      console.log('Signup failed: Invalid email format');
+      return res.status(400).json({ error: 'Invalid email format' });
+    }
+
+    if (password.length < 8) {
+      console.log('Signup failed: Password too short');
+      return res.status(400).json({ error: 'Password must be at least 8 characters long' });
+    }
+
+    console.log('Attempting signup for:', email);
+    const result = await signUpWithEmail(email, password);
+    
+    if (!result.user) {
+      console.log('Signup failed: No user data returned');
+      return res.status(400).json({ error: 'Failed to create user' });
+    }
+
+    console.log('Signup successful:', {
+      user: result.user,
+      session: result.session ? {
+        access_token: result.session.access_token ? 'present' : 'missing',
+        refresh_token: result.session.refresh_token ? 'present' : 'missing',
+        expires_at: result.session.expires_at
+      } : null
+    });
+    
+    res.json(result);
+  } catch (error) {
+    console.error('Signup error:', {
+      message: error.message,
+      code: error.code,
+      details: error.details,
+      stack: error.stack
+    });
+
+    if (error.message?.includes('already registered')) {
+      return res.status(400).json({ error: 'Email already registered. Please sign in instead.' });
+    }
+    
+    res.status(400).json({ error: error.message || 'Signup failed' });
+  }
+});
+
+app.post('/auth/signin', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      console.log('Signin failed: Missing email or password');
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      console.log('Signin failed: Invalid email format');
+      return res.status(400).json({ error: 'Invalid email format' });
+    }
+
+    console.log('Attempting signin for:', email);
+    const result = await signInWithEmail(email, password);
+    
+    if (!result.user) {
+      console.log('Signin failed: No user data returned');
+      return res.status(400).json({ error: 'Failed to sign in' });
+    }
+
+    console.log('User signed in successfully:', {
+      id: result.user.id,
+      email: result.user.email,
+      user_metadata: result.user.user_metadata,
+      app_metadata: result.user.app_metadata,
+      created_at: result.user.created_at,
+      updated_at: result.user.updated_at,
+      last_sign_in_at: result.user.last_sign_in_at,
+      role: result.user.role,
+      identities: result.user.identities
+    });
+
+    console.log('Signin successful:', {
+      user: result.user,
+      session: result.session ? {
+        access_token: result.session.access_token ? 'present' : 'missing',
+        refresh_token: result.session.refresh_token ? 'present' : 'missing',
+        expires_at: result.session.expires_at
+      } : null
+    });
+    
+    res.json(result);
+  } catch (error) {
+    console.error('Signin error:', {
+      message: error.message,
+      code: error.code,
+      details: error.details,
+      stack: error.stack
+    });
+
+    if (error.message?.includes('Invalid login credentials')) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+    
+    res.status(400).json({ error: error.message || 'Signin failed' });
+  }
+});
+
+app.post('/auth/refresh', async (req, res) => {
+  try {
+    const { refresh_token } = req.body;
+    if (!refresh_token) {
+      console.log('Refresh failed: No refresh token provided');
+      return res.status(400).json({ error: 'Refresh token is required' });
+    }
+
+    console.log('Attempting to refresh session with token:', refresh_token);
+    
+    const { data: { session }, error } = await supabase.auth.refreshSession({
+      refresh_token: refresh_token
+    });
+
+    if (error) {
+      console.error('Session refresh error:', error);
+      return res.status(401).json({ error: 'Invalid refresh token' });
+    }
+
+    if (!session) {
+      console.error('No session returned from refresh');
+      return res.status(401).json({ error: 'Failed to refresh session' });
+    }
+
+    console.log('Session refreshed successfully');
+    res.json({ session });
+  } catch (error) {
+    console.error('Session refresh error:', {
+      message: error.message,
+      code: error.code,
+      details: error.details
+    });
+    res.status(400).json({ error: error.message || 'Failed to refresh session' });
+  }
+});
+
+app.post('/auth/google', async (req, res) => {
+  try {
+    console.log('Attempting Google signin');
+    const result = await signInWithGoogle();
+    
+    if (result.url) {
+      console.log('Redirecting to Google OAuth:', result.url);
+      return res.json({ url: result.url });
+    }
+
+    if (result.user) {
+      console.log('User signed in with Google:', {
+        id: result.user.id,
+        email: result.user.email,
+        user_metadata: result.user.user_metadata,
+        app_metadata: result.user.app_metadata,
+        created_at: result.user.created_at,
+        updated_at: result.user.updated_at,
+        last_sign_in_at: result.user.last_sign_in_at,
+        role: result.user.role,
+        identities: result.user.identities,
+        avatar_url: result.user.user_metadata?.avatar_url,
+        full_name: result.user.user_metadata?.full_name
+      });
+    }
+
+    console.log('Google signin successful:', {
+      user: result.user,
+      session: result.session ? {
+        access_token: result.session.access_token ? 'present' : 'missing',
+        refresh_token: result.session.refresh_token ? 'present' : 'missing',
+        expires_at: result.session.expires_at
+      } : null
+    });
+    
+    res.json(result);
+  } catch (error) {
+    console.error('Google auth error:', {
+      message: error.message,
+      code: error.code,
+      details: error.details
+    });
+    res.status(400).json({ error: error.message || 'Google authentication failed' });
+  }
+});
+
+app.get('/auth/callback', async (req, res) => {
+  try {
+    const { code } = req.query;
+    if (!code) {
+      return res.status(400).json({ error: 'No code provided' });
+    }
+
+    const { data: { session }, error } = await supabase.auth.exchangeCodeForSession(code);
+    if (error) throw error;
+
+    res.redirect(`${process.env.FRONTEND_URL}/auth/callback?session=${encodeURIComponent(JSON.stringify(session))}`);
+  } catch (error) {
+    console.error('OAuth callback error:', error);
+    res.redirect(`${process.env.FRONTEND_URL}/auth/callback?error=${encodeURIComponent(error.message)}`);
+  }
+});
+
+app.get('/auth/user', authenticateToken, async (req, res) => {
+  try {
+    console.log('Fetching current user');
+    const user = await getCurrentUser();
+    
+    const userData = {
+      id: user.id,
+      email: user.email,
+      user_metadata: user.user_metadata || {},
+      app_metadata: user.app_metadata || {},
+      created_at: user.created_at,
+      updated_at: user.updated_at
+    };
+    
+    console.log('User data retrieved:', {
+      ...userData,
+      user_metadata: userData.user_metadata ? 'present' : 'missing'
+    });
+    
+    res.json({ user: userData });
+  } catch (error) {
+    console.error('Get user error:', {
+      message: error.message,
+      code: error.code,
+      details: error.details
+    });
+    res.status(400).json({ error: error.message || 'Failed to get user' });
+  }
+});
+
+app.post('/auth/signout', async (req, res) => {
+  try {
+    console.log('Attempting signout');
+    
+    const result = await signOut();
+    
+    res.clearCookie('session');
+    
+    console.log('Signout successful');
+    res.json({ success: true, message: 'Successfully signed out' });
+  } catch (error) {
+    console.error('Signout error:', {
+      message: error.message,
+      code: error.code,
+      details: error.details
+    });
+    res.json({ success: true, message: 'Successfully signed out' });
+  }
+});
+
+app.get('/auth/session', authenticateToken, async (req, res) => {
+  try {
+    console.log('Fetching session');
+    const session = await getSession();
+    console.log('Session retrieved:', session ? {
+      access_token: session.access_token ? 'present' : 'missing',
+      refresh_token: session.refresh_token ? 'present' : 'missing',
+      expires_at: session.expires_at
+    } : null);
+    res.json({ session });
+  } catch (error) {
+    console.error('Get session error:', {
+      message: error.message,
+      code: error.code,
+      details: error.details
+    });
+    res.status(400).json({ error: error.message || 'Failed to get session' });
+  }
+});
+
+app.post('/lifestyle/score', authenticateToken, async (req, res) => {
+  try {
+    const onboardingData = req.body;
+    
+    if (!onboardingData) {
+      return res.status(400).json({ error: 'Onboarding data is required' });
+    }
+
+    console.log('\n=== LIFESTYLE SCORE CALCULATION ===');
+    console.log('User ID:', req.user.id);
+    console.log('\nOnboarding Data:');
+    console.log(JSON.stringify(onboardingData, null, 2));
+
+    const scoreData = calculateLifestyleScore(onboardingData);
+    
+    console.log('\nCalculated Scores:');
+    console.log('Overall Score:', scoreData.overallScore);
+    console.log('Yearly Decline Rate:', scoreData.yearlyDeclineRate + '%');
+    console.log('Impact Multiplier:', scoreData.impactMultiplier);
+    
+    console.log('\nFactor Scores:');
+    Object.entries(scoreData.factorScores).forEach(([factor, score]) => {
+      console.log(`${factor}: ${score}`);
+    });
+    
+    console.log('\nFactor Descriptions:');
+    Object.entries(scoreData.factorDescriptions).forEach(([factor, description]) => {
+      console.log(`${factor}: ${description}`);
+    });
+    
+    console.log('\nRecommendations:');
+    scoreData.recommendations.forEach((rec, index) => {
+      console.log(`${index + 1}. ${rec}`);
+    });
+    
+    console.log('\n=== END LIFESTYLE SCORE ===\n');
+    
+    const { data, error } = await supabaseAdmin
+      .from('lifestyle_scores')
+      .insert([
+        {
+          user_id: req.user.id,
+          overall_score: scoreData.overallScore,
+          yearly_decline_rate: scoreData.yearlyDeclineRate,
+          impact_multiplier: scoreData.impactMultiplier,
+          factor_scores: scoreData.factorScores,
+          factor_descriptions: scoreData.factorDescriptions,
+          recommendations: scoreData.recommendations,
+          created_at: new Date().toISOString()
+        }
+      ])
+      .select();
+
+    if (error) {
+      console.error('Error storing lifestyle score:', error);
+    }
+
+    res.json(scoreData);
+  } catch (error) {
+    console.error('Lifestyle score calculation error:', error);
+    res.status(500).json({ error: 'Failed to calculate lifestyle score' });
+  }
+});
+
+app.get('/lifestyle/score', authenticateToken, async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('lifestyle_scores')
+      .select('*')
+      .eq('user_id', req.user.id)
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (error) {
+      console.error('Error fetching lifestyle score:', error);
+      return res.status(500).json({ error: 'Failed to fetch lifestyle score' });
+    }
+
+    if (!data || data.length === 0) {
+      return res.status(404).json({ error: 'No lifestyle score found' });
+    }
+
+    res.json(data[0]);
+  } catch (error) {
+    console.error('Error fetching lifestyle score:', error);
+    res.status(500).json({ error: 'Failed to fetch lifestyle score' });
+  }
+});
+
+app.get('/daily-missions', authenticateToken, async (req, res) => {
+  try {
+    const data = await getDailyMissions(req.user.id);
+    res.json(data);
+  } catch (error) {
+    console.error('Error in daily missions endpoint:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch daily missions' });
+  }
+});
+
+app.post('/daily-missions', authenticateToken, async (req, res) => {
+  try {
+    const { date, missions } = req.body;
+    const result = await saveDailyMissions(req.user.id, date, missions);
+    
+    try {
+      const { data: profileData, error: profileError } = await supabaseAdmin
+        .from('user_profiles')
+        .select('onboarding_data')
+        .eq('id', req.user.id)
+        .single();
+
+      if (!profileError && profileData?.onboarding_data) {
+        const onboardingData = profileData.onboarding_data;
+        
+        const progressResult = await checkAndSaveDailyProgress(req.user.id, date, missions, onboardingData);
+        
+        if (progressResult.success) {
+          console.log('Daily progress automatically saved:', progressResult.metrics);
+        }
+      } else {
+        console.log('No onboarding data found for user, skipping progress save');
+      }
+    } catch (progressError) {
+      console.error('Error checking daily progress:', progressError);
+    }
+    
+    res.json(result);
+  } catch (error) {
+    console.error('Error in save daily missions endpoint:', error);
+    res.status(500).json({ error: error.message || 'Failed to save daily missions' });
+  }
+});
+
+app.post('/daily-missions/check-progress', authenticateToken, async (req, res) => {
+  try {
+    const { date, missions, onboardingData } = req.body;
+    
+    if (!date || !missions || !onboardingData) {
+      return res.status(400).json({ error: 'Date, missions, and onboarding data are required' });
+    }
+
+    const result = await checkAndSaveDailyProgress(req.user.id, date, missions, onboardingData);
+    res.json(result);
+  } catch (error) {
+    console.error('Error in check daily progress endpoint:', error);
+    res.status(500).json({ error: error.message || 'Failed to check daily progress' });
+  }
+});
+
+app.get('/daily-missions/stats', authenticateToken, async (req, res) => {
+  try {
+    const stats = await getDailyMissionStats(req.user.id);
+    res.json(stats);
+  } catch (error) {
+    console.error('Error in daily missions stats endpoint:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch daily mission stats' });
+  }
+});
+
+app.get('/daily-missions/today', authenticateToken, async (req, res) => {
+  try {
+    const data = await getTodayDailyMissions(req.user.id);
+    res.json(data);
+  } catch (error) {
+    console.error('Error in today\'s daily missions endpoint:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch today\'s daily missions' });
+  }
+});
+
+app.get('/daily-missions/completed/:date', authenticateToken, async (req, res) => {
+  try {
+    const { date } = req.params;
+    const isCompleted = await checkMissionsCompleted(req.user.id, date);
+    res.json({ completed: isCompleted });
+  } catch (error) {
+    console.error('Error in check missions completion endpoint:', error);
+    res.status(500).json({ error: error.message || 'Failed to check missions completion' });
+  }
+});
+
+app.get('/progress', authenticateToken, async (req, res) => {
+  try {
+    const data = await getUserProgress(req.user.id);
+    res.json(data);
+  } catch (error) {
+    console.error('Error in progress endpoint:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch progress data' });
+  }
+});
+
+app.post('/progress', authenticateToken, async (req, res) => {
+  try {
+    const { date, healthData } = req.body;
+    const result = await saveUserProgress(req.user.id, date, healthData);
+    res.json(result);
+  } catch (error) {
+    console.error('Error in save progress endpoint:', error);
+    res.status(500).json({ error: error.message || 'Failed to save progress data' });
+  }
+});
+
+app.get('/progress/stats', authenticateToken, async (req, res) => {
+  try {
+    const stats = await getProgressStats(req.user.id);
+    res.json(stats);
+  } catch (error) {
+    console.error('Error in progress stats endpoint:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch progress stats' });
+  }
+});
+
+app.get('/progress/today', authenticateToken, async (req, res) => {
+  try {
+    const data = await getTodayProgress(req.user.id);
+    res.json(data);
+  } catch (error) {
+    console.error('Error in today\'s progress endpoint:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch today\'s progress' });
+  }
+});
+
+app.post('/user/onboarding', authenticateToken, async (req, res) => {
+  try {
+    const onboardingData = req.body;
+    
+    if (!onboardingData) {
+      return res.status(400).json({ error: 'Onboarding data is required' });
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('user_profiles')
+      .upsert([
+        {
+          id: req.user.id,
+          onboarding_data: onboardingData,
+          updated_at: new Date().toISOString()
+        }
+      ], {
+        onConflict: 'id'
+      })
+      .select();
+
+    if (error) {
+      console.error('Error storing onboarding data:', error);
+      return res.status(500).json({ error: 'Failed to store onboarding data' });
+    }
+
+    res.json({ success: true, data: data[0] });
+  } catch (error) {
+    console.error('Error storing onboarding data:', error);
+    res.status(500).json({ error: 'Failed to store onboarding data' });
+  }
+});
+
+app.get('/user/onboarding', authenticateToken, async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('user_profiles')
+      .select('onboarding_data')
+      .eq('id', req.user.id)
+      .single();
+
+    if (error && error.code !== 'PGRST116') {
+      console.error('Error fetching onboarding data:', error);
+      return res.status(500).json({ error: 'Failed to fetch onboarding data' });
+    }
+
+    res.json({ data: data?.onboarding_data || null });
+  } catch (error) {
+    console.error('Error fetching onboarding data:', error);
+    res.status(500).json({ error: 'Failed to fetch onboarding data' });
+  }
+});
+
+app.post('/subscription/checkout', authenticateToken, async (req, res) => {
+  try {
+    const { name } = req.body;
+    
+    const session = await createSubscriptionCheckout(
+      req.user.id, 
+      req.user.email, 
+      name || req.user.user_metadata?.full_name
+    );
+    
+    res.json({ session });
+  } catch (error) {
+    console.error('Error creating subscription checkout:', error);
+    res.status(500).json({ error: error.message || 'Failed to create subscription checkout' });
+  }
+});
+
+app.post('/subscription/portal', authenticateToken, async (req, res) => {
+  try {
+    const session = await createCustomerPortalSession(req.user.id);
+    res.json({ session });
+  } catch (error) {
+    console.error('Error creating customer portal session:', error);
+    res.status(500).json({ error: error.message || 'Failed to create customer portal session' });
+  }
+});
+
+app.get('/subscription/status', authenticateToken, async (req, res) => {
+  try {
+    const subscription = await getSubscriptionStatus(req.user.id);
+    res.json(subscription);
+  } catch (error) {
+    console.error('Error fetching subscription status:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch subscription status' });
+  }
+});
+
+app.post('/subscription/cancel', authenticateToken, async (req, res) => {
+  try {
+    const subscription = await cancelSubscription(req.user.id);
+    res.json({ success: true, subscription });
+  } catch (error) {
+    console.error('Error canceling subscription:', error);
+    res.status(500).json({ error: error.message || 'Failed to cancel subscription' });
+  }
+});
+
+app.post('/subscription/reactivate', authenticateToken, async (req, res) => {
+  try {
+    const subscription = await reactivateSubscription(req.user.id);
+    res.json({ success: true, subscription });
+  } catch (error) {
+    console.error('Error reactivating subscription:', error);
+    res.status(500).json({ error: error.message || 'Failed to reactivate subscription' });
+  }
+});
+
+// Stripe webhook endpoint
+app.post('/webhook/stripe', express.raw({ type: 'application/json' }), async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+  let event;
+
+  try {
+    event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
+  } catch (err) {
+    console.error('Webhook signature verification failed:', err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  try {
+    await handleWebhookEvent(event);
+    res.json({ received: true });
+  } catch (error) {
+    console.error('Error handling webhook event:', error);
+    res.status(500).json({ error: 'Webhook handler failed' });
+  }
+});
+
+// Premium features endpoints (require subscription)
+app.get('/premium/features', authenticateToken, requireSubscription, async (req, res) => {
+  try {
+    // Example premium features
+    const features = [
+      'Advanced analytics',
+      'Personalized recommendations',
+      'Priority support',
+      'Exclusive content'
+    ];
+    
+    res.json({ 
+      features,
+      subscription: req.subscription 
+    });
+  } catch (error) {
+    console.error('Error fetching premium features:', error);
+    res.status(500).json({ error: 'Failed to fetch premium features' });
+  }
+});
+
+const PORT = process.env.PORT || 3000;
+const HOST = '0.0.0.0';
+
+app.listen(PORT, HOST, () => {
+  console.log(`Server running at http://${HOST}:${PORT}`);
+  console.log(`Local: http://localhost:${PORT}`);
+  console.log(`Network: http://192.168.0.232:${PORT}`);
+}); 
