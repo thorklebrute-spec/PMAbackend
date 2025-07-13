@@ -954,10 +954,39 @@ app.put('/profile', authenticateToken, async (req, res) => {
   }
 });
 
-app.post('/profile/picture', authenticateToken, upload.single('profile_picture'), async (req, res) => {
+app.post('/profile/picture', authenticateToken, async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No file uploaded' });
+    const { image, fileName, mimeType } = req.body;
+    
+    if (!image || !fileName || !mimeType) {
+      return res.status(400).json({ 
+        error: 'Missing required fields: image (base64), fileName, mimeType' 
+      });
+    }
+
+    // Validate that it's a base64 image
+    if (!image.startsWith('data:image/')) {
+      return res.status(400).json({ 
+        error: 'Invalid image format. Must be a base64 encoded image.' 
+      });
+    }
+
+    // Validate mime type
+    if (!mimeType.startsWith('image/')) {
+      return res.status(400).json({ 
+        error: 'Invalid mime type. Only image files are allowed.' 
+      });
+    }
+
+    // Convert base64 to buffer
+    const base64Data = image.replace(/^data:image\/[a-z]+;base64,/, '');
+    const fileBuffer = Buffer.from(base64Data, 'base64');
+
+    // Validate file size (5MB limit)
+    if (fileBuffer.length > 5 * 1024 * 1024) {
+      return res.status(400).json({ 
+        error: 'File size too large. Maximum size is 5MB.' 
+      });
     }
 
     // Get current profile to check if there's an existing picture
@@ -967,9 +996,9 @@ app.post('/profile/picture', authenticateToken, upload.single('profile_picture')
     // Upload new picture
     const pictureUrl = await uploadProfilePicture(
       req.user.id,
-      req.file.buffer,
-      req.file.originalname,
-      req.file.mimetype
+      fileBuffer,
+      fileName,
+      mimeType
     );
 
     // Update profile with new picture URL
