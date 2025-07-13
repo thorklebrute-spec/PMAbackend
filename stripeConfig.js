@@ -12,8 +12,9 @@ const SUBSCRIPTION_CONFIG = {
   MONTHLY_PRICE_ID: process.env.STRIPE_MONTHLY_PRICE_ID,
   TRIAL_DAYS: 14,
   CURRENCY: 'usd',
-  SUCCESS_URL: `${process.env.FRONTEND_URL}/subscription/success`,
-  CANCEL_URL: `${process.env.FRONTEND_URL}/subscription/cancel`,
+  // For WebView integration, use the frontend URL with proper scheme
+  SUCCESS_URL: `${process.env.FRONTEND_URL || 'exp://localhost:8081'}/stripe-checkout?status=success&session_id={CHECKOUT_SESSION_ID}`,
+  CANCEL_URL: `${process.env.FRONTEND_URL || 'exp://localhost:8081'}/stripe-checkout?status=cancel`,
 };
 
 // Validate Stripe configuration

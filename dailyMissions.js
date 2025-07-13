@@ -185,7 +185,7 @@ export const checkMissionsCompleted = async (userId, date) => {
   try {
     const { data, error } = await supabaseAdmin
       .from('daily_missions')
-      .select('sleep_completed, exercise_completed, sunlight_completed, diet_completed, alcohol_avoided, no_porn_masturbation')
+      .select('sleep_completed, exercise_completed, sunlight_completed, diet_completed, alcohol_avoided, cold_exposure_completed, no_porn_masturbation')
       .eq('user_id', userId)
       .eq('date', date)
       .single();
@@ -200,7 +200,7 @@ export const checkMissionsCompleted = async (userId, date) => {
     }
 
     // Check if all required missions are completed (including the new No FAP mission)
-    const requiredMissions = ['sleep_completed', 'exercise_completed', 'sunlight_completed', 'diet_completed', 'alcohol_avoided', 'no_porn_masturbation'];
+    const requiredMissions = ['sleep_completed', 'exercise_completed', 'sunlight_completed', 'diet_completed', 'alcohol_avoided', 'cold_exposure_completed', 'no_porn_masturbation'];
     const allCompleted = requiredMissions.every(mission => data[mission] === true);
 
     return allCompleted;

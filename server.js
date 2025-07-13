@@ -1,9 +1,10 @@
 import express from 'express';
 import cors from 'cors';
+import multer from 'multer';
 import { supabase, supabaseAdmin, signUpWithEmail, signInWithEmail, signInWithGoogle, signOut, getCurrentUser, getSession, refreshSession } from './supabaseClient.js';
 import { calculateLifestyleScore } from './lifestyleScore.js';
 import { getDailyMissions, saveDailyMissions, getDailyMissionStats, getTodayDailyMissions, checkMissionsCompleted } from './dailyMissions.js';
-import { getUserProgress, saveUserProgress, getProgressStats, getTodayProgress, checkAndSaveDailyProgress } from './progress.js';
+import { getUserProgress, saveUserProgress, getProgressStats, getTodayProgress, checkAndSaveDailyProgress, populateProgressFromMissions } from './progress.js';
 import { 
   createSubscriptionCheckout, 
   createCustomerPortalSession, 
@@ -14,8 +15,33 @@ import {
 } from './subscriptionService.js';
 import { requireSubscription, checkSubscription } from './subscriptionMiddleware.js';
 import { stripe } from './stripeConfig.js';
+import { processDailyRankUpdate, getUserRank, getLeaderboard } from './rankSystem.js';
+import { 
+  getUserProfile, 
+  updateUserProfile, 
+  uploadProfilePicture, 
+  deleteProfilePicture,
+  getProfilePictureUrl 
+} from './profileService.js';
 
 const app = express();
+
+// Configure multer for file uploads
+const storage = multer.memoryStorage();
+const upload = multer({ 
+  storage: storage,
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    // Only allow image files
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed'), false);
+    }
+  }
+});
 
 app.use(cors({
   origin: '*',
@@ -350,10 +376,25 @@ app.get('/auth/session', authenticateToken, async (req, res) => {
 
 app.post('/lifestyle/score', authenticateToken, async (req, res) => {
   try {
-    const onboardingData = req.body;
-    
-    if (!onboardingData) {
+    let onboardingData = req.body;
+    if (!onboardingData || Object.keys(onboardingData).length === 0) {
+      const { data: profile, error: profileError } = await supabaseAdmin
+        .from('user_profiles')
+        .select('onboarding_data')
+        .eq('id', req.user.id)
+        .single();
+      if (profileError || !profile?.onboarding_data) {
       return res.status(400).json({ error: 'Onboarding data is required' });
+      }
+      onboardingData = profile.onboarding_data;
+    }
+
+    // Validate onboardingData fields
+    const requiredFields = ['goal', 'diet', 'hadTest', 'age', 'spermCount', 'exerciseDays', 'smoke', 'alcohol', 'sleep', 'stress', 'sunlightExposure', 'supplements', 'dataLog'];
+    for (const field of requiredFields) {
+      if (onboardingData[field] === undefined) {
+        return res.status(400).json({ error: `Missing field: ${field}` });
+      }
     }
 
     console.log('\n=== LIFESTYLE SCORE CALCULATION ===');
@@ -361,7 +402,13 @@ app.post('/lifestyle/score', authenticateToken, async (req, res) => {
     console.log('\nOnboarding Data:');
     console.log(JSON.stringify(onboardingData, null, 2));
 
-    const scoreData = calculateLifestyleScore(onboardingData);
+    let scoreData;
+    try {
+      scoreData = calculateLifestyleScore(onboardingData);
+    } catch (err) {
+      console.error('Error in calculateLifestyleScore:', err, onboardingData);
+      return res.status(500).json({ error: 'Failed to calculate lifestyle score', details: err.message });
+    }
     
     console.log('\nCalculated Scores:');
     console.log('Overall Score:', scoreData.overallScore);
@@ -450,28 +497,94 @@ app.get('/daily-missions', authenticateToken, async (req, res) => {
 app.post('/daily-missions', authenticateToken, async (req, res) => {
   try {
     const { date, missions } = req.body;
+    
+    // Prevent unchecking completed missions
+    const existingMissions = await getTodayDailyMissions(req.user.id);
+    if (existingMissions) {
+      // Check if any completed missions are being unchecked
+      const missionFields = ['sleep_completed', 'exercise_completed', 'sunlight_completed', 'diet_completed', 'alcohol_avoided', 'cold_exposure_completed', 'no_porn_masturbation'];
+      const isUnchecking = missionFields.some(field => 
+        existingMissions[field] === true && missions[field] === false
+      );
+      
+      if (isUnchecking) {
+        return res.status(400).json({ 
+          error: 'Cannot uncheck completed missions. Once a mission is completed, it cannot be undone.' 
+        });
+      }
+    }
+    
     const result = await saveDailyMissions(req.user.id, date, missions);
     
     try {
+      console.log('🔍 Checking if progress should be saved...');
+      console.log('User ID:', req.user.id);
+      console.log('Date:', date);
+      console.log('Missions:', missions);
+      
       const { data: profileData, error: profileError } = await supabaseAdmin
         .from('user_profiles')
         .select('onboarding_data')
         .eq('id', req.user.id)
         .single();
 
-      if (!profileError && profileData?.onboarding_data) {
+      if (profileError) {
+        console.log('❌ Error fetching onboarding data:', profileError);
+      } else if (!profileData?.onboarding_data) {
+        console.log('⚠️  No onboarding data found for user, skipping progress save');
+      } else {
+        console.log('✅ Onboarding data found, checking if all missions completed...');
         const onboardingData = profileData.onboarding_data;
         
         const progressResult = await checkAndSaveDailyProgress(req.user.id, date, missions, onboardingData);
         
         if (progressResult.success) {
-          console.log('Daily progress automatically saved:', progressResult.metrics);
+          console.log('✅ Daily progress automatically saved:', progressResult.metrics);
+        } else {
+          console.log('ℹ️  Progress not saved:', progressResult.message);
         }
-      } else {
-        console.log('No onboarding data found for user, skipping progress save');
       }
     } catch (progressError) {
-      console.error('Error checking daily progress:', progressError);
+      console.error('❌ Error checking daily progress:', progressError);
+      console.error('Error details:', {
+        message: progressError.message,
+        stack: progressError.stack
+      });
+    }
+
+    // Process rank update for daily missions
+    try {
+      console.log('🏆 Processing rank update for daily missions...');
+      // Get user's lifestyle score for bonus calculation
+      const { data: lifestyleData } = await supabaseAdmin
+        .from('lifestyle_scores')
+        .select('overall_score')
+        .eq('user_id', req.user.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      const lifestyleScore = lifestyleData?.overall_score || null;
+      // The daily points cap (max 50) is enforced in rankSystem.js/calculateDailyPoints
+      const rankUpdate = await processDailyRankUpdate(req.user.id, date, missions, lifestyleScore);
+      
+      console.log('✅ Rank update completed:', {
+        pointsEarned: rankUpdate.pointsEarned,
+        newRank: rankUpdate.rankInfo.name,
+        totalPoints: rankUpdate.newTotalPoints
+      });
+      
+      // Add rank info to response
+      result.rankUpdate = {
+        pointsEarned: rankUpdate.pointsEarned,
+        newRank: rankUpdate.rankInfo.name,
+        totalPoints: rankUpdate.newTotalPoints,
+        pointsToNextRank: rankUpdate.rank.points_to_next_rank
+      };
+      
+    } catch (rankError) {
+      console.error('⚠️  Rank update failed:', rankError);
+      // Don't fail the mission save if rank update fails
     }
     
     res.json(result);
@@ -593,6 +706,21 @@ app.post('/user/onboarding', authenticateToken, async (req, res) => {
     if (error) {
       console.error('Error storing onboarding data:', error);
       return res.status(500).json({ error: 'Failed to store onboarding data' });
+    }
+
+    // Automatically populate progress from existing daily missions
+    try {
+      console.log('🔄 Auto-populating progress after onboarding completion...');
+      const populateResult = await populateProgressFromMissions(req.user.id);
+      
+      if (populateResult.success) {
+        console.log('✅ Auto-progress population successful:', populateResult.message);
+      } else {
+        console.log('ℹ️  Auto-progress population skipped:', populateResult.message);
+      }
+    } catch (populateError) {
+      console.error('⚠️  Auto-progress population failed:', populateError);
+      // Don't fail the onboarding if progress population fails
     }
 
     res.json({ success: true, data: data[0] });
@@ -720,6 +848,178 @@ app.get('/premium/features', authenticateToken, requireSubscription, async (req,
   } catch (error) {
     console.error('Error fetching premium features:', error);
     res.status(500).json({ error: 'Failed to fetch premium features' });
+  }
+});
+
+app.post('/progress/populate-from-missions', authenticateToken, async (req, res) => {
+  try {
+    console.log('🔄 Progress population request received for user:', req.user.id);
+    
+    const result = await populateProgressFromMissions(req.user.id);
+    
+    if (result.success) {
+      console.log('✅ Progress population successful:', result.message);
+      res.json(result);
+    } else {
+      console.log('⚠️  Progress population failed:', result.message);
+      res.status(400).json(result);
+    }
+  } catch (error) {
+    console.error('❌ Error in progress population endpoint:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message || 'Failed to populate progress from missions' 
+    });
+  }
+});
+
+// Rank system endpoints
+app.get('/rank', authenticateToken, async (req, res) => {
+  try {
+    const rankData = await getUserRank(req.user.id);
+    res.json(rankData);
+  } catch (error) {
+    console.error('Error fetching user rank:', error);
+    res.status(500).json({ error: 'Failed to fetch user rank' });
+  }
+});
+
+app.get('/rank/leaderboard', authenticateToken, async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 10;
+    const leaderboard = await getLeaderboard(limit);
+    res.json(leaderboard);
+  } catch (error) {
+    console.error('Error fetching leaderboard:', error);
+    res.status(500).json({ error: 'Failed to fetch leaderboard' });
+  }
+});
+
+app.get('/rank/daily-points', authenticateToken, async (req, res) => {
+  try {
+    const { date } = req.query;
+    const targetDate = date || new Date().toISOString().split('T')[0];
+    
+    const { data: dailyPoints, error } = await supabaseAdmin
+      .from('daily_points')
+      .select('*')
+      .eq('user_id', req.user.id)
+      .eq('date', targetDate)
+      .single();
+
+    if (error && error.code !== 'PGRST116') {
+      throw error;
+    }
+
+    res.json(dailyPoints || null);
+  } catch (error) {
+    console.error('Error fetching daily points:', error);
+    res.status(500).json({ error: 'Failed to fetch daily points' });
+  }
+});
+
+// Profile management endpoints
+app.get('/profile', authenticateToken, async (req, res) => {
+  try {
+    const profile = await getUserProfile(req.user.id);
+    res.json(profile);
+  } catch (error) {
+    console.error('Error fetching user profile:', error);
+    res.status(500).json({ error: 'Failed to fetch user profile' });
+  }
+});
+
+app.put('/profile', authenticateToken, async (req, res) => {
+  try {
+    const { display_name, bio } = req.body;
+    
+    // Validate input
+    if (display_name && display_name.length > 100) {
+      return res.status(400).json({ error: 'Display name must be 100 characters or less' });
+    }
+    
+    if (bio && bio.length > 500) {
+      return res.status(400).json({ error: 'Bio must be 500 characters or less' });
+    }
+
+    const updatedProfile = await updateUserProfile(req.user.id, {
+      display_name,
+      bio
+    });
+
+    res.json(updatedProfile);
+  } catch (error) {
+    console.error('Error updating user profile:', error);
+    res.status(500).json({ error: 'Failed to update user profile' });
+  }
+});
+
+app.post('/profile/picture', authenticateToken, upload.single('profile_picture'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    // Get current profile to check if there's an existing picture
+    const currentProfile = await getUserProfile(req.user.id);
+    let oldPictureUrl = null;
+
+    // Upload new picture
+    const pictureUrl = await uploadProfilePicture(
+      req.user.id,
+      req.file.buffer,
+      req.file.originalname,
+      req.file.mimetype
+    );
+
+    // Update profile with new picture URL
+    const updatedProfile = await updateUserProfile(req.user.id, {
+      profile_picture_url: pictureUrl
+    });
+
+    // Delete old picture if it exists
+    if (currentProfile.profile_picture_url) {
+      try {
+        await deleteProfilePicture(req.user.id, currentProfile.profile_picture_url);
+      } catch (deleteError) {
+        console.error('Error deleting old profile picture:', deleteError);
+        // Don't fail the request if deletion fails
+      }
+    }
+
+    res.json({
+      profile: updatedProfile,
+      picture_url: pictureUrl
+    });
+  } catch (error) {
+    console.error('Error uploading profile picture:', error);
+    res.status(500).json({ error: 'Failed to upload profile picture' });
+  }
+});
+
+app.delete('/profile/picture', authenticateToken, async (req, res) => {
+  try {
+    const currentProfile = await getUserProfile(req.user.id);
+    
+    if (!currentProfile.profile_picture_url) {
+      return res.status(404).json({ error: 'No profile picture found' });
+    }
+
+    // Delete the picture from storage
+    await deleteProfilePicture(req.user.id, currentProfile.profile_picture_url);
+
+    // Update profile to remove picture URL
+    const updatedProfile = await updateUserProfile(req.user.id, {
+      profile_picture_url: null
+    });
+
+    res.json({
+      success: true,
+      profile: updatedProfile
+    });
+  } catch (error) {
+    console.error('Error deleting profile picture:', error);
+    res.status(500).json({ error: 'Failed to delete profile picture' });
   }
 });
 

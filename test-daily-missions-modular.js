@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_URL = 'http://localhost:3000';
+const API_URL = 'http://192.168.0.232:3000';
 
 // Test data for daily missions
 const testDailyMissions = {
@@ -24,7 +24,7 @@ async function testModularDailyMissions() {
     console.log('1. Testing authentication...');
     const signinResponse = await axios.post(`${API_URL}/auth/signin`, {
       email: 'jesse.mashoana@gmail.com',
-      password: 'testpassword123'
+      password: 'Marshall@32'
     });
 
     if (!signinResponse.data.session?.access_token) {
