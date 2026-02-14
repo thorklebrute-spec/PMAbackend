@@ -243,8 +243,9 @@ app.post('/auth/refresh', async (req, res) => {
 
 app.post('/auth/google', async (req, res) => {
   try {
-    console.log('Attempting Google signin');
-    const result = await signInWithGoogle();
+    const { redirectUrl } = req.body || {};
+    console.log('Attempting Google signin, redirectUrl:', redirectUrl);
+    const result = await signInWithGoogle(redirectUrl);
     
     if (result.url) {
       console.log('Redirecting to Google OAuth:', result.url);

@@ -157,12 +157,12 @@ export const signInWithEmail = async (email, password) => {
   }
 };
 
-export const signInWithGoogle = async () => {
+export const signInWithGoogle = async (redirectUrl) => {
   try {
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: `${process.env.FRONTEND_URL}/auth/callback`,
+        redirectTo: redirectUrl || `${process.env.FRONTEND_URL}/auth/callback`,
         queryParams: {
           access_type: 'offline',
           prompt: 'consent',
