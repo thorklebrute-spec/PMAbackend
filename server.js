@@ -241,11 +241,36 @@ app.post('/auth/refresh', async (req, res) => {
   }
 });
 
+// Mobile OAuth callback - serves an HTML page that reads tokens from the
+// URL fragment and redirects to the Expo app via deep link
+app.get('/auth/mobile-callback', (req, res) => {
+  const appRedirect = req.query.appRedirect || 'exp://';
+  res.send(`<!DOCTYPE html><html><head><title>Signing in...</title></head><body>
+    <p>Completing sign in...</p>
+    <script>
+      const hash = window.location.hash.substring(1);
+      if (hash) {
+        window.location.href = decodeURIComponent("${encodeURIComponent(appRedirect)}") + "#" + hash;
+      } else {
+        document.body.innerHTML = "<p>Authentication failed. Please close this and try again.</p>";
+      }
+    </script>
+  </body></html>`);
+});
+
 app.post('/auth/google', async (req, res) => {
   try {
     const { redirectUrl } = req.body || {};
     console.log('Attempting Google signin, redirectUrl:', redirectUrl);
-    const result = await signInWithGoogle(redirectUrl);
+
+    // Build a backend callback URL that will redirect to the app
+    let oauthRedirect;
+    if (redirectUrl) {
+      const baseUrl = process.env.RENDER_EXTERNAL_URL || `${req.protocol}://${req.get('host')}`;
+      oauthRedirect = `${baseUrl}/auth/mobile-callback?appRedirect=${encodeURIComponent(redirectUrl)}`;
+    }
+
+    const result = await signInWithGoogle(oauthRedirect);
     
     if (result.url) {
       console.log('Redirecting to Google OAuth:', result.url);
