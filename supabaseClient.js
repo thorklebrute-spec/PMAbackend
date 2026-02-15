@@ -210,7 +210,7 @@ export const getCurrentUser = async () => {
     
     // Ensure we have the full user data including metadata
     if (user) {
-      const { data: { user: fullUser }, error: userError } = await supabase.auth.admin.getUserById(user.id);
+      const { data: { user: fullUser }, error: userError } = await supabaseAdmin.auth.admin.getUserById(user.id);
       if (userError) throw userError;
       return fullUser;
     }
