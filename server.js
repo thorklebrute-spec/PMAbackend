@@ -856,6 +856,20 @@ app.post('/webhook/stripe', express.raw({ type: 'application/json' }), async (re
   }
 });
 
+// Stripe redirect pages - simple HTML pages the WebView detects via URL params
+app.get('/subscription/success', (req, res) => {
+  const sessionId = req.query.session_id || '';
+  res.send(`<!DOCTYPE html><html><head><title>Payment Successful</title></head><body style="display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;background:#121212;color:#fff;">
+    <div style="text-align:center"><h1>Payment Successful!</h1><p>Your subscription is now active.</p></div>
+  </body></html>`);
+});
+
+app.get('/subscription/cancel', (req, res) => {
+  res.send(`<!DOCTYPE html><html><head><title>Payment Canceled</title></head><body style="display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;background:#121212;color:#fff;">
+    <div style="text-align:center"><h1>Payment Canceled</h1><p>You can try again anytime.</p></div>
+  </body></html>`);
+});
+
 // Premium features endpoints (require subscription)
 app.get('/premium/features', authenticateToken, requireSubscription, async (req, res) => {
   try {
