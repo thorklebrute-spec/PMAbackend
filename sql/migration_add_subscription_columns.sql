@@ -13,4 +13,4 @@ CREATE INDEX IF NOT EXISTS idx_user_profiles_stripe_customer_id ON user_profiles
 CREATE INDEX IF NOT EXISTS idx_user_profiles_subscription_status ON user_profiles(subscription_status);
 
 -- Migration completed successfully
-SELECT 'Migration: subscription columns added to user_profiles table successfully' as status; 
+SELECT 'Migration: subscription columns added to user_profiles table successfully' as status;

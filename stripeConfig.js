@@ -10,7 +10,7 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
 // Subscription configuration
 const SUBSCRIPTION_CONFIG = {
   MONTHLY_PRICE_ID: process.env.STRIPE_MONTHLY_PRICE_ID,
-  TRIAL_DAYS: 14,
+  TRIAL_DAYS: 7,
   CURRENCY: 'usd',
   // For WebView integration, use the frontend URL with proper scheme
   SUCCESS_URL: `${process.env.FRONTEND_URL || 'exp://localhost:8081'}/stripe-checkout?status=success&session_id={CHECKOUT_SESSION_ID}`,

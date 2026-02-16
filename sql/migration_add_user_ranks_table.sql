@@ -50,4 +50,4 @@ CREATE INDEX IF NOT EXISTS idx_user_ranks_total_points ON user_ranks(total_point
 CREATE INDEX IF NOT EXISTS idx_user_ranks_rank_tier ON user_ranks(rank_tier);
 
 -- Migration completed successfully
-SELECT 'Migration: user_ranks table created successfully' as status; 
+SELECT 'Migration: user_ranks table created successfully' as status;
