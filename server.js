@@ -333,8 +333,12 @@ app.get('/auth/callback', async (req, res) => {
 app.get('/auth/user', authenticateToken, async (req, res) => {
   try {
     console.log('Fetching current user');
-    const user = await getCurrentUser();
-    
+    // req.user is already set by authenticateToken middleware via supabase.auth.getUser(token)
+    // Fetch full user data (including metadata) using admin API
+    const { data: { user: fullUser }, error: userError } = await supabaseAdmin.auth.admin.getUserById(req.user.id);
+    if (userError) throw userError;
+
+    const user = fullUser || req.user;
     const userData = {
       id: user.id,
       email: user.email,
