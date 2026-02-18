@@ -53,6 +53,14 @@ app.use(cors({
 
 app.use(express.json());
 
+app.get('/', (req, res) => {
+  res.json({ status: 'ok', service: 'Primal Male API' });
+});
+
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok' });
+});
+
 const authenticateToken = async (req, res, next) => {
   try {
     const authHeader = req.headers['authorization'];
@@ -241,6 +249,12 @@ app.post('/auth/refresh', async (req, res) => {
   }
 });
 
+app.get('/auth/email-confirmed', (req, res) => {
+  res.send(`<!DOCTYPE html><html><head><title>Email Confirmed</title></head><body style="display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;background:#121212;color:#fff;">
+    <div style="text-align:center"><h1>Email Confirmed!</h1><p>You can now open the app and sign in.</p></div>
+  </body></html>`);
+});
+
 // Mobile OAuth callback - serves an HTML page that reads tokens from the
 // URL fragment and redirects to the Expo app via deep link
 app.get('/auth/mobile-callback', (req, res) => {
@@ -323,10 +337,14 @@ app.get('/auth/callback', async (req, res) => {
     const { data: { session }, error } = await supabase.auth.exchangeCodeForSession(code);
     if (error) throw error;
 
-    res.redirect(`${process.env.FRONTEND_URL}/auth/callback?session=${encodeURIComponent(JSON.stringify(session))}`);
+    res.send(`<!DOCTYPE html><html><head><title>Signed In</title></head><body style="display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;background:#121212;color:#fff;">
+      <div style="text-align:center"><h1>Sign In Successful</h1><p>You can return to the app now.</p></div>
+    </body></html>`);
   } catch (error) {
     console.error('OAuth callback error:', error);
-    res.redirect(`${process.env.FRONTEND_URL}/auth/callback?error=${encodeURIComponent(error.message)}`);
+    res.send(`<!DOCTYPE html><html><head><title>Sign In Failed</title></head><body style="display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;background:#121212;color:#fff;">
+      <div style="text-align:center"><h1>Sign In Failed</h1><p>${error.message}</p></div>
+    </body></html>`);
   }
 });
 
@@ -871,6 +889,12 @@ app.get('/subscription/success', (req, res) => {
 app.get('/subscription/cancel', (req, res) => {
   res.send(`<!DOCTYPE html><html><head><title>Payment Canceled</title></head><body style="display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;background:#121212;color:#fff;">
     <div style="text-align:center"><h1>Payment Canceled</h1><p>You can try again anytime.</p></div>
+  </body></html>`);
+});
+
+app.get('/subscription/portal-return', (req, res) => {
+  res.send(`<!DOCTYPE html><html><head><title>Subscription Updated</title></head><body style="display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;background:#121212;color:#fff;">
+    <div style="text-align:center"><h1>Subscription Updated</h1><p>You can close this window and return to the app.</p></div>
   </body></html>`);
 });
 

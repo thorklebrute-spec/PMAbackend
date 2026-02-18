@@ -1,4 +1,4 @@
-import { stripe, SUBSCRIPTION_CONFIG } from './stripeConfig.js';
+import { stripe, SUBSCRIPTION_CONFIG, getBaseUrl } from './stripeConfig.js';
 import { supabaseAdmin } from './supabaseClient.js';
 
 // Create a Stripe customer
@@ -106,7 +106,7 @@ export const createCustomerPortalSession = async (userId) => {
 
     const session = await stripe.billingPortal.sessions.create({
       customer: profile.stripe_customer_id,
-      return_url: `${process.env.FRONTEND_URL}/settings`,
+      return_url: `${getBaseUrl()}/subscription/portal-return`,
     });
 
     return session;

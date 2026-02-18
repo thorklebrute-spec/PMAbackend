@@ -48,7 +48,7 @@ export const signUpWithEmail = async (email, password) => {
       email,
       password,
       options: {
-        emailRedirectTo: `${process.env.FRONTEND_URL}/auth/callback`,
+        emailRedirectTo: `${process.env.RENDER_EXTERNAL_URL || 'https://pmabackend-osap.onrender.com'}/auth/email-confirmed`,
         data: {
           email_confirmed: false
         }
@@ -162,7 +162,7 @@ export const signInWithGoogle = async (redirectUrl) => {
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: redirectUrl || `${process.env.FRONTEND_URL}/auth/callback`,
+        redirectTo: redirectUrl || `${process.env.RENDER_EXTERNAL_URL || 'https://pmabackend-osap.onrender.com'}/auth/mobile-callback`,
         queryParams: {
           access_type: 'offline',
           prompt: 'consent',

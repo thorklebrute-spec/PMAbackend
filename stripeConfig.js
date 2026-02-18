@@ -31,4 +31,4 @@ if (!process.env.STRIPE_MONTHLY_PRICE_ID) {
   throw new Error('STRIPE_MONTHLY_PRICE_ID is required');
 }
 
-export { stripe, SUBSCRIPTION_CONFIG }; 
+export { stripe, SUBSCRIPTION_CONFIG, getBaseUrl }; 
