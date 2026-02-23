@@ -33,15 +33,6 @@ export const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey || sup
 export const signUpWithEmail = async (email, password) => {
   try {
     console.log('Starting signup process for:', email);
-    
-    // First check if user already exists
-    const { data: existingUser, error: checkError } = await supabase.auth.getUser();
-    if (checkError) {
-      console.log('No existing user found, proceeding with signup');
-    } else if (existingUser?.user?.email === email) {
-      console.log('User already exists, attempting sign in instead');
-      return await signInWithEmail(email, password);
-    }
 
     // Proceed with signup
     const { data, error } = await supabase.auth.signUp({
@@ -64,14 +55,8 @@ export const signUpWithEmail = async (email, password) => {
       throw error;
     }
 
-    console.log('Signup successful, getting session...');
-    
-    // Get the session
-    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-    if (sessionError) {
-      console.error('Failed to get session after signup:', sessionError);
-      throw sessionError;
-    }
+    console.log('Signup successful');
+    const session = data.session || null;
 
     console.log('Supabase signup response:', {
       user: data.user,
@@ -100,14 +85,6 @@ export const signUpWithEmail = async (email, password) => {
 export const signInWithEmail = async (email, password) => {
   try {
     console.log('Starting signin process for:', email);
-    
-    // First check if user exists
-    const { data: existingUser, error: checkError } = await supabase.auth.getUser();
-    if (checkError) {
-      console.log('No existing user found');
-    } else {
-      console.log('Found existing user:', existingUser.user?.email);
-    }
 
     // Attempt sign in
     const { data, error } = await supabase.auth.signInWithPassword({
@@ -124,14 +101,8 @@ export const signInWithEmail = async (email, password) => {
       throw error;
     }
 
-    console.log('Signin successful, getting session...');
-    
-    // Get the session
-    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-    if (sessionError) {
-      console.error('Failed to get session after signin:', sessionError);
-      throw sessionError;
-    }
+    console.log('Signin successful');
+    const session = data.session || null;
 
     console.log('Supabase signin response:', {
       user: data.user,
@@ -201,55 +172,4 @@ export const signOut = async () => {
     console.error('Supabase signout error:', error);
     throw error;
   }
-};
-
-export const getCurrentUser = async () => {
-  try {
-    const { data: { user }, error } = await supabase.auth.getUser();
-    if (error) throw error;
-    
-    // Ensure we have the full user data including metadata
-    if (user) {
-      const { data: { user: fullUser }, error: userError } = await supabaseAdmin.auth.admin.getUserById(user.id);
-      if (userError) throw userError;
-      return fullUser;
-    }
-    
-    return user;
-  } catch (error) {
-    console.error('Supabase getCurrentUser error:', error);
-    throw error;
-  }
-};
-
-export const getSession = async () => {
-  try {
-    const { data: { session }, error } = await supabase.auth.getSession();
-    if (error) throw error;
-    return session;
-  } catch (error) {
-    console.error('Supabase getSession error:', error);
-    throw error;
-  }
-};
-
-export const refreshSession = async () => {
-  try {
-    const { data: { session }, error } = await supabase.auth.refreshSession();
-    if (error) throw error;
-    return session;
-  } catch (error) {
-    console.error('Supabase refreshSession error:', error);
-    throw error;
-  }
-};
-
-// JWT specific functions
-export const getJWT = async () => {
-  const session = await getSession();
-  return session ? session.access_token : null;
-};
-
-export const setJWT = async (jwt) => {
-  await AsyncStorage.setItem('jwt', jwt);
 };

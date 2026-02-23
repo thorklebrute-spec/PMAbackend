@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
-import { supabase, supabaseAdmin, signUpWithEmail, signInWithEmail, signInWithGoogle, signOut, getCurrentUser, getSession, refreshSession } from './supabaseClient.js';
+import { supabase, supabaseAdmin, signUpWithEmail, signInWithEmail, signInWithGoogle, signOut } from './supabaseClient.js';
 import { calculateLifestyleScore } from './lifestyleScore.js';
 import { getDailyMissions, saveDailyMissions, getDailyMissionStats, getTodayDailyMissions, checkMissionsCompleted } from './dailyMissions.js';
 import { getUserProgress, saveUserProgress, getProgressStats, getTodayProgress, checkAndSaveDailyProgress, populateProgressFromMissions } from './progress.js';
@@ -14,7 +14,7 @@ import {
   handleWebhookEvent 
 } from './subscriptionService.js';
 import { requireSubscription, checkSubscription } from './subscriptionMiddleware.js';
-import { stripe } from './stripeConfig.js';
+import { stripe, SUBSCRIPTION_CONFIG } from './stripeConfig.js';
 import { processDailyRankUpdate, getUserRank, getLeaderboard } from './rankSystem.js';
 import { 
   getUserProfile, 
@@ -93,11 +93,6 @@ app.use((req, res, next) => {
     });
   }
   next();
-});
-
-app.use((err, req, res, next) => {
-  console.error('Server error:', err.stack);
-  res.status(500).json({ error: 'Something went wrong!' });
 });
 
 app.post('/auth/signup', async (req, res) => {
@@ -365,13 +360,47 @@ app.get('/auth/user', authenticateToken, async (req, res) => {
       created_at: user.created_at,
       updated_at: user.updated_at
     };
+
+    const { data: profile, error: profileError } = await supabaseAdmin
+      .from('user_profiles')
+      .select('subscription_status')
+      .eq('id', user.id)
+      .single();
+
+    if (profileError && profileError.code !== 'PGRST116') {
+      throw profileError;
+    }
+
+    const subscriptionStatus = profile?.subscription_status || 'no_subscription';
+    const subscriptionActive = ['active', 'trialing'].includes(subscriptionStatus);
+
+    const trialDays = Number(SUBSCRIPTION_CONFIG?.TRIAL_DAYS) || 7;
+    const createdAt = new Date(user.created_at);
+    const trialEndsAt = new Date(createdAt.getTime() + trialDays * 24 * 60 * 60 * 1000);
+    const now = new Date();
+    const trialActive = now < trialEndsAt;
+    const trialDaysRemaining = trialActive
+      ? Math.ceil((trialEndsAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+      : 0;
+    const hasAccess = subscriptionActive || trialActive;
+    const reason = subscriptionActive ? 'subscription_active' : (trialActive ? 'trial_active' : 'no_access');
+
+    const access = {
+      hasAccess,
+      reason,
+      subscriptionStatus,
+      trialActive,
+      trialDaysRemaining,
+      trialEndsAt: trialEndsAt.toISOString()
+    };
     
     console.log('User data retrieved:', {
       ...userData,
-      user_metadata: userData.user_metadata ? 'present' : 'missing'
+      user_metadata: userData.user_metadata ? 'present' : 'missing',
+      access
     });
     
-    res.json({ user: userData });
+    res.json({ user: userData, access });
   } catch (error) {
     console.error('Get user error:', {
       message: error.message,
@@ -404,13 +433,19 @@ app.post('/auth/signout', async (req, res) => {
 
 app.get('/auth/session', authenticateToken, async (req, res) => {
   try {
-    console.log('Fetching session');
-    const session = await getSession();
-    console.log('Session retrieved:', session ? {
-      access_token: session.access_token ? 'present' : 'missing',
-      refresh_token: session.refresh_token ? 'present' : 'missing',
-      expires_at: session.expires_at
-    } : null);
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+    const session = token
+      ? {
+          access_token: token,
+          user: {
+            id: req.user.id,
+            email: req.user.email
+          }
+        }
+      : null;
+
+    console.log('Session retrieved:', session ? { access_token: 'present' } : null);
     res.json({ session });
   } catch (error) {
     console.error('Get session error:', {
@@ -1118,6 +1153,11 @@ app.delete('/profile/picture', authenticateToken, async (req, res) => {
     console.error('Error deleting profile picture:', error);
     res.status(500).json({ error: 'Failed to delete profile picture' });
   }
+});
+
+app.use((err, req, res, next) => {
+  console.error('Server error:', err.stack);
+  res.status(500).json({ error: 'Something went wrong!' });
 });
 
 const PORT = process.env.PORT || 3000;

@@ -296,7 +296,7 @@ export const getLeaderboard = async (limit = 10) => {
         rank_tier,
         rank_level,
         streak_days,
-        user_profiles!inner(onboarding_data)
+        user_profiles!inner(display_name, onboarding_data)
       `)
       .order('total_points', { ascending: false })
       .limit(limit);
@@ -311,7 +311,9 @@ export const getLeaderboard = async (limit = 10) => {
       rankTier: entry.rank_tier,
       rankLevel: entry.rank_level,
       streakDays: entry.streak_days,
-      displayName: entry.user_profiles?.onboarding_data?.displayName || `User ${entry.user_id.slice(0, 8)}`
+      displayName: entry.user_profiles?.display_name
+        || entry.user_profiles?.onboarding_data?.displayName
+        || `User ${entry.user_id.slice(0, 8)}`
     }));
   } catch (error) {
     console.error('Error getting leaderboard:', error);
