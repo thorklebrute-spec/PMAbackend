@@ -371,19 +371,37 @@ app.get('/auth/user', authenticateToken, async (req, res) => {
       throw profileError;
     }
 
-    const subscriptionStatus = profile?.subscription_status || 'no_subscription';
-    const subscriptionActive = ['active', 'trialing'].includes(subscriptionStatus);
+    // Prefer live Stripe state for reliability. If it fails, fall back to DB state.
+    let liveSubscription = null;
+    try {
+      liveSubscription = await getSubscriptionStatus(user.id);
+    } catch (subscriptionError) {
+      console.warn('Falling back to DB subscription status:', subscriptionError.message);
+    }
 
+    const subscriptionStatus = liveSubscription?.status || profile?.subscription_status || 'no_subscription';
+    const stripeTrialEndSec = liveSubscription?.subscription?.trial_end || null;
+    const stripeTrialEndsAt = stripeTrialEndSec ? new Date(stripeTrialEndSec * 1000) : null;
+
+    const now = new Date();
     const trialDays = Number(SUBSCRIPTION_CONFIG?.TRIAL_DAYS) || 7;
     const createdAt = new Date(user.created_at);
-    const trialEndsAt = new Date(createdAt.getTime() + trialDays * 24 * 60 * 60 * 1000);
-    const now = new Date();
-    const trialActive = now < trialEndsAt;
-    const trialDaysRemaining = trialActive
-      ? Math.ceil((trialEndsAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
-      : 0;
+    const appTrialEndsAt = new Date(createdAt.getTime() + trialDays * 24 * 60 * 60 * 1000);
+    const appTrialActive = now < appTrialEndsAt;
+
+    // Stripe trial is authoritative when present.
+    const stripeTrialActive = stripeTrialEndsAt ? now < stripeTrialEndsAt : false;
+    // App trial is only used for users who do not yet have a subscription object.
+    const trialActive = stripeTrialActive || (subscriptionStatus === 'no_subscription' && appTrialActive);
+
+    const subscriptionActive = ['active', 'trialing'].includes(subscriptionStatus) || stripeTrialActive;
     const hasAccess = subscriptionActive || trialActive;
     const reason = subscriptionActive ? 'subscription_active' : (trialActive ? 'trial_active' : 'no_access');
+
+    const effectiveTrialEndsAt = stripeTrialEndsAt || appTrialEndsAt;
+    const trialDaysRemaining = trialActive
+      ? Math.ceil((effectiveTrialEndsAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+      : 0;
 
     const access = {
       hasAccess,
@@ -391,7 +409,7 @@ app.get('/auth/user', authenticateToken, async (req, res) => {
       subscriptionStatus,
       trialActive,
       trialDaysRemaining,
-      trialEndsAt: trialEndsAt.toISOString()
+      trialEndsAt: effectiveTrialEndsAt.toISOString()
     };
     
     console.log('User data retrieved:', {
