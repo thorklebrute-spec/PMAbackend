@@ -9,7 +9,7 @@ serve(async (req) => {
   const today = new Date().toISOString().split("T")[0];
 
   // Penalty values
-  const RANK_PENALTY = 10;
+  const RANK_PENALTY = 400;
   const PROGRESS_PENALTY = {
     testosterone: 2, // ng/dL
     spermCount: 0.5, // million/mL
@@ -65,15 +65,19 @@ serve(async (req) => {
       // 3. Deduct points from rank
       const { data: rank, error: rankError } = await supabase
         .from("user_ranks")
-        .select("total_points")
+        .select("total_points, streak_days")
         .eq("user_id", user.id)
         .single();
 
-      if (rank && rank.total_points > 0) {
+      if (rank) {
         const newPoints = Math.max(0, rank.total_points - RANK_PENALTY);
+        const newStreak = Math.max(0, (rank.streak_days || 0) - 1);
         await supabase
           .from("user_ranks")
-          .update({ total_points: newPoints })
+          .update({
+            total_points: newPoints,
+            streak_days: newStreak
+          })
           .eq("user_id", user.id);
       }
 

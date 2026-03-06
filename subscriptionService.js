@@ -93,7 +93,6 @@ export const createSubscriptionCheckout = async (userId, email, name = null) => 
     const eligibleForTrial = withinTrialWindow && !hasUsedStripeBefore;
 
     const subscriptionData = {
-      trial_from_plan: false,
       metadata: {
         userId: userId,
       },
@@ -101,6 +100,9 @@ export const createSubscriptionCheckout = async (userId, email, name = null) => 
 
     if (eligibleForTrial) {
       subscriptionData.trial_period_days = Number(SUBSCRIPTION_CONFIG.TRIAL_DAYS) || 0;
+    } else {
+      // Do not inherit a trial from the Stripe Price for ineligible users.
+      subscriptionData.trial_from_plan = false;
     }
 
     const session = await stripe.checkout.sessions.create({
