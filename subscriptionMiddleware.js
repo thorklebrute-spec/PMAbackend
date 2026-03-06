@@ -7,12 +7,10 @@ export const requireSubscription = async (req, res, next) => {
     
     const subscription = await getSubscriptionStatus(userId);
     
-    // Allow access if user has active subscription or is in trial
-    const hasAccess = subscription.status === 'active' || 
-                     subscription.status === 'trialing' ||
-                     (subscription.subscription && 
-                      subscription.subscription.trial_end && 
-                      subscription.subscription.trial_end > Math.floor(Date.now() / 1000));
+    // Stripe-only access model: only active/trialing can pass
+    const hasAccess =
+      subscription.status === 'active' ||
+      subscription.status === 'trialing';
     
     if (!hasAccess) {
       return res.status(403).json({ 

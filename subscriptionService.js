@@ -1,17 +1,6 @@
 import { stripe, SUBSCRIPTION_CONFIG, getBaseUrl } from './stripeConfig.js';
 import { supabaseAdmin } from './supabaseClient.js';
 
-const ONE_DAY_MS = 24 * 60 * 60 * 1000;
-
-const isWithinAppTrialWindow = (createdAt) => {
-  if (!createdAt) return false;
-  const created = new Date(createdAt);
-  if (Number.isNaN(created.getTime())) return false;
-  const trialDays = Number(SUBSCRIPTION_CONFIG.TRIAL_DAYS) || 0;
-  const expiresAt = new Date(created.getTime() + trialDays * ONE_DAY_MS);
-  return new Date() < expiresAt;
-};
-
 const hasPriorStripeSubscription = async (customerId) => {
   const subscriptions = await stripe.subscriptions.list({
     customer: customerId,
@@ -80,17 +69,8 @@ export const getOrCreateStripeCustomer = async (userId, email, name = null) => {
 export const createSubscriptionCheckout = async (userId, email, name = null) => {
   try {
     const customer = await getOrCreateStripeCustomer(userId, email, name);
-    const { data: authUserData, error: authUserError } =
-      await supabaseAdmin.auth.admin.getUserById(userId);
-
-    if (authUserError) {
-      throw authUserError;
-    }
-
-    const createdAt = authUserData?.user?.created_at || null;
-    const withinTrialWindow = isWithinAppTrialWindow(createdAt);
     const hasUsedStripeBefore = await hasPriorStripeSubscription(customer.id);
-    const eligibleForTrial = withinTrialWindow && !hasUsedStripeBefore;
+    const eligibleForTrial = !hasUsedStripeBefore;
 
     const subscriptionData = {
       metadata: {

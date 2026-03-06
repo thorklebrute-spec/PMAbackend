@@ -14,7 +14,7 @@ import {
   handleWebhookEvent 
 } from './subscriptionService.js';
 import { requireSubscription, checkSubscription } from './subscriptionMiddleware.js';
-import { stripe, SUBSCRIPTION_CONFIG } from './stripeConfig.js';
+import { stripe } from './stripeConfig.js';
 import { processDailyRankUpdate, getUserRank, getLeaderboard } from './rankSystem.js';
 import { 
   getUserProfile, 
@@ -382,26 +382,17 @@ app.get('/auth/user', authenticateToken, async (req, res) => {
     const subscriptionStatus = liveSubscription?.status || profile?.subscription_status || 'no_subscription';
     const stripeTrialEndSec = liveSubscription?.subscription?.trial_end || null;
     const stripeTrialEndsAt = stripeTrialEndSec ? new Date(stripeTrialEndSec * 1000) : null;
-
     const now = new Date();
-    const trialDays = Number(SUBSCRIPTION_CONFIG?.TRIAL_DAYS) || 7;
-    const createdAt = new Date(user.created_at);
-    const appTrialEndsAt = new Date(createdAt.getTime() + trialDays * 24 * 60 * 60 * 1000);
-    const appTrialActive = now < appTrialEndsAt;
-
-    // Stripe trial is authoritative when present.
-    const stripeTrialActive = stripeTrialEndsAt ? now < stripeTrialEndsAt : false;
-    // App trial is only used for users who do not yet have a subscription object.
-    const trialActive = stripeTrialActive || (subscriptionStatus === 'no_subscription' && appTrialActive);
-
-    const subscriptionActive = ['active', 'trialing'].includes(subscriptionStatus) || stripeTrialActive;
-    const hasAccess = subscriptionActive || trialActive;
-    const reason = subscriptionActive ? 'subscription_active' : (trialActive ? 'trial_active' : 'no_access');
-
-    const effectiveTrialEndsAt = stripeTrialEndsAt || appTrialEndsAt;
-    const trialDaysRemaining = trialActive
-      ? Math.ceil((effectiveTrialEndsAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
-      : 0;
+    const subscriptionActive = ['active', 'trialing'].includes(subscriptionStatus);
+    const hasAccess = subscriptionActive;
+    const trialActive = subscriptionStatus === 'trialing';
+    const reason = hasAccess
+      ? (trialActive ? 'trial_active' : 'subscription_active')
+      : 'no_access';
+    const trialDaysRemaining =
+      trialActive && stripeTrialEndsAt && stripeTrialEndsAt > now
+        ? Math.ceil((stripeTrialEndsAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+        : 0;
 
     const access = {
       hasAccess,
@@ -409,7 +400,7 @@ app.get('/auth/user', authenticateToken, async (req, res) => {
       subscriptionStatus,
       trialActive,
       trialDaysRemaining,
-      trialEndsAt: effectiveTrialEndsAt.toISOString()
+      trialEndsAt: stripeTrialEndsAt ? stripeTrialEndsAt.toISOString() : null
     };
     
     console.log('User data retrieved:', {
