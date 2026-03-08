@@ -4,7 +4,7 @@ import multer from 'multer';
 import { supabase, supabaseAdmin, signUpWithEmail, signInWithEmail, signInWithGoogle, signOut } from './supabaseClient.js';
 import { calculateLifestyleScore } from './lifestyleScore.js';
 import { getDailyMissions, saveDailyMissions, getDailyMissionStats, getTodayDailyMissions, checkMissionsCompleted } from './dailyMissions.js';
-import { getUserProgress, saveUserProgress, getProgressStats, getTodayProgress, checkAndSaveDailyProgress, populateProgressFromMissions } from './progress.js';
+import { getUserProgress, saveUserProgress, getProgressStats, getTodayProgress, checkAndSaveDailyProgress, populateProgressFromMissions, enrichHealthDataForUnits } from './progress.js';
 import { 
   createSubscriptionCheckout, 
   createCustomerPortalSession, 
@@ -736,7 +736,11 @@ app.get('/daily-missions/completed/:date', authenticateToken, async (req, res) =
 app.get('/progress', authenticateToken, async (req, res) => {
   try {
     const data = await getUserProgress(req.user.id);
-    res.json(data);
+    const enriched = (data || []).map(entry => ({
+      ...entry,
+      health_data: enrichHealthDataForUnits(entry.health_data)
+    }));
+    res.json(enriched);
   } catch (error) {
     console.error('Error in progress endpoint:', error);
     res.status(500).json({ error: error.message || 'Failed to fetch progress data' });
@@ -839,6 +843,60 @@ app.get('/user/onboarding', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Error fetching onboarding data:', error);
     res.status(500).json({ error: 'Failed to fetch onboarding data' });
+  }
+});
+
+app.get('/user/preferences', authenticateToken, async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('user_profiles')
+      .select('units_preference')
+      .eq('id', req.user.id)
+      .single();
+
+    if (error && error.code !== 'PGRST116') {
+      console.error('Error fetching user preferences:', error);
+      return res.status(500).json({ error: 'Failed to fetch user preferences' });
+    }
+
+    const unitsPreference = data?.units_preference === 'imperial' ? 'imperial' : 'metric';
+    res.json({ unitsPreference });
+  } catch (error) {
+    console.error('Error fetching user preferences:', error);
+    res.status(500).json({ error: 'Failed to fetch user preferences' });
+  }
+});
+
+app.patch('/user/preferences', authenticateToken, async (req, res) => {
+  try {
+    const { unitsPreference } = req.body;
+
+    if (unitsPreference !== 'metric' && unitsPreference !== 'imperial') {
+      return res.status(400).json({ error: 'Invalid unitsPreference. Allowed: metric|imperial' });
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('user_profiles')
+      .upsert([
+        {
+          id: req.user.id,
+          units_preference: unitsPreference,
+          updated_at: new Date().toISOString()
+        }
+      ], {
+        onConflict: 'id'
+      })
+      .select();
+
+    if (error) {
+      console.error('Error updating user preferences:', error);
+      return res.status(500).json({ error: 'Failed to update user preferences' });
+    }
+
+    res.json({ success: true, unitsPreference });
+  } catch (error) {
+    console.error('Error updating user preferences:', error);
+    res.status(500).json({ error: 'Failed to update user preferences' });
   }
 });
 

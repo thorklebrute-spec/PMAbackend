@@ -1,5 +1,25 @@
 import { supabaseAdmin } from './supabaseClient.js';
 
+// Map health_data labels to metric keys and base units for frontend conversion
+const LABEL_TO_METRIC = {
+  'Testosterone': { metric: 'testosterone', baseUnit: 'ng/dL' },
+  'Sperm Count': { metric: 'spermCount', baseUnit: 'm/mL' },
+  'Strength': { metric: 'strength', baseUnit: 'kg' }
+};
+
+export const enrichHealthDataForUnits = (healthData) => {
+  if (!Array.isArray(healthData)) return healthData;
+  return healthData.map(item => {
+    const meta = LABEL_TO_METRIC[item.label] || { metric: item.label?.toLowerCase?.()?.replace(/\s/g, '') || 'unknown', baseUnit: null };
+    return {
+      ...item,
+      metric: meta.metric,
+      numericValue: parseFloat(item.value) || 0,
+      baseUnit: meta.baseUnit
+    };
+  });
+};
+
 // Cap daily improvements for each metric
 const MAX_DAILY_IMPROVEMENTS = {
   testosterone: 10, // ng/dL per day
