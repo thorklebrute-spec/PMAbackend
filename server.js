@@ -208,6 +208,64 @@ app.post('/auth/signin', async (req, res) => {
   }
 });
 
+app.post('/auth/resend-confirmation', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ error: 'Invalid email format' });
+    }
+
+    console.log('Resending confirmation email to:', email);
+    const { error } = await supabase.auth.resend({ type: 'signup', email });
+
+    if (error) {
+      console.error('Resend confirmation error:', error.message);
+      return res.status(400).json({ error: error.message || 'Failed to resend confirmation email' });
+    }
+
+    console.log('Confirmation email resent to:', email);
+    res.json({ message: 'Confirmation email sent' });
+  } catch (error) {
+    console.error('Resend confirmation unexpected error:', error);
+    res.status(500).json({ error: 'Failed to resend confirmation email' });
+  }
+});
+
+app.post('/auth/forgot-password', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ error: 'Invalid email format' });
+    }
+
+    console.log('Sending password reset email to:', email);
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: 'primalmale://reset-password',
+    });
+
+    if (error) {
+      console.error('Forgot password error:', error.message);
+    }
+
+    // Always return success to avoid revealing whether an account exists
+    console.log('Password reset email request processed for:', email);
+    res.json({ message: 'If an account with that email exists, a password reset link has been sent.' });
+  } catch (error) {
+    console.error('Forgot password unexpected error:', error);
+    res.status(500).json({ error: 'Failed to send password reset email' });
+  }
+});
+
 app.post('/auth/refresh', async (req, res) => {
   try {
     const { refresh_token } = req.body;
