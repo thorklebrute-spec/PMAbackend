@@ -383,16 +383,26 @@ app.get('/auth/user', authenticateToken, async (req, res) => {
     const stripeTrialEndSec = liveSubscription?.subscription?.trial_end || null;
     const stripeTrialEndsAt = stripeTrialEndSec ? new Date(stripeTrialEndSec * 1000) : null;
     const now = new Date();
+    const IN_APP_TRIAL_DAYS = 7;
+    const accountCreatedAt = user.created_at ? new Date(user.created_at) : null;
+    const accountAgeMs = accountCreatedAt ? now.getTime() - accountCreatedAt.getTime() : Infinity;
+    const accountAgeDays = accountAgeMs / (1000 * 60 * 60 * 24);
+    const inAppTrialActive = subscriptionStatus === 'no_subscription' && accountAgeDays < IN_APP_TRIAL_DAYS;
+    const inAppTrialDaysRemaining = inAppTrialActive
+      ? Math.ceil(IN_APP_TRIAL_DAYS - accountAgeDays)
+      : 0;
+
     const subscriptionActive = ['active', 'trialing'].includes(subscriptionStatus);
-    const hasAccess = subscriptionActive;
-    const trialActive = subscriptionStatus === 'trialing';
-    const reason = hasAccess
-      ? (trialActive ? 'trial_active' : 'subscription_active')
-      : 'no_access';
-    const trialDaysRemaining =
-      trialActive && stripeTrialEndsAt && stripeTrialEndsAt > now
-        ? Math.ceil((stripeTrialEndsAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
-        : 0;
+    const hasAccess = subscriptionActive || inAppTrialActive;
+    const trialActive = subscriptionStatus === 'trialing' || inAppTrialActive;
+    const reason = subscriptionActive
+      ? (subscriptionStatus === 'trialing' ? 'trial_active' : 'subscription_active')
+      : inAppTrialActive
+        ? 'in_app_trial'
+        : 'no_access';
+    const trialDaysRemaining = subscriptionStatus === 'trialing' && stripeTrialEndsAt && stripeTrialEndsAt > now
+      ? Math.ceil((stripeTrialEndsAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+      : inAppTrialDaysRemaining;
 
     const access = {
       hasAccess,
