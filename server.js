@@ -23,6 +23,7 @@ import {
   deleteProfilePicture,
   getProfilePictureUrl 
 } from './profileService.js';
+import { generateOrGetWeeklyCoachReport } from './aiCoachService.js';
 
 const app = express();
 
@@ -233,6 +234,26 @@ app.post('/auth/resend-confirmation', async (req, res) => {
   } catch (error) {
     console.error('Resend confirmation unexpected error:', error);
     res.status(500).json({ error: 'Failed to resend confirmation email' });
+  }
+});
+
+app.post('/ai/coach/weekly-report', authenticateToken, async (req, res) => {
+  try {
+    const { reportDay = 'Sunday', personality = 'balanced' } = req.body || {};
+    const report = await generateOrGetWeeklyCoachReport(req.user.id, {
+      reportDay,
+      personality,
+    });
+    res.json(report);
+  } catch (error) {
+    console.error('AI coach weekly report error:', {
+      message: error.message,
+      code: error.code,
+      details: error.details,
+    });
+    res.status(500).json({
+      error: error.message || 'Failed to generate weekly AI coach report',
+    });
   }
 });
 
