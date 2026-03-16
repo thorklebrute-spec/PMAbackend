@@ -24,6 +24,7 @@ import {
   getProfilePictureUrl 
 } from './profileService.js';
 import { generateOrGetWeeklyCoachReport } from './aiCoachService.js';
+import { migrateGuestDataToUser } from './guestMigrationService.js';
 
 const app = express();
 
@@ -257,6 +258,25 @@ app.post('/ai/coach/weekly-report', authenticateToken, async (req, res) => {
   }
 });
 
+app.post('/user/migrate-guest-data', authenticateToken, async (req, res) => {
+  try {
+    const result = await migrateGuestDataToUser(req.user.id, req.body || {});
+    res.json(result);
+  } catch (error) {
+    console.error('Guest data migration error:', {
+      message: error.message,
+      code: error.code,
+      details: error.details,
+    });
+    const status = error.message?.includes('must') || error.message?.includes('invalid') || error.message?.includes('exceeds')
+      ? 400
+      : 500;
+    res.status(status).json({
+      error: error.message || 'Failed to migrate guest data',
+    });
+  }
+});
+
 app.post('/auth/forgot-password', async (req, res) => {
   try {
     const { email } = req.body;
@@ -462,26 +482,15 @@ app.get('/auth/user', authenticateToken, async (req, res) => {
     const stripeTrialEndSec = liveSubscription?.subscription?.trial_end || null;
     const stripeTrialEndsAt = stripeTrialEndSec ? new Date(stripeTrialEndSec * 1000) : null;
     const now = new Date();
-    const IN_APP_TRIAL_DAYS = 7;
-    const accountCreatedAt = user.created_at ? new Date(user.created_at) : null;
-    const accountAgeMs = accountCreatedAt ? now.getTime() - accountCreatedAt.getTime() : Infinity;
-    const accountAgeDays = accountAgeMs / (1000 * 60 * 60 * 24);
-    const inAppTrialActive = subscriptionStatus === 'no_subscription' && accountAgeDays < IN_APP_TRIAL_DAYS;
-    const inAppTrialDaysRemaining = inAppTrialActive
-      ? Math.ceil(IN_APP_TRIAL_DAYS - accountAgeDays)
-      : 0;
-
     const subscriptionActive = ['active', 'trialing'].includes(subscriptionStatus);
-    const hasAccess = subscriptionActive || inAppTrialActive;
-    const trialActive = subscriptionStatus === 'trialing' || inAppTrialActive;
+    const hasAccess = subscriptionActive;
+    const trialActive = subscriptionStatus === 'trialing';
     const reason = subscriptionActive
       ? (subscriptionStatus === 'trialing' ? 'trial_active' : 'subscription_active')
-      : inAppTrialActive
-        ? 'in_app_trial'
-        : 'no_access';
+      : 'no_access';
     const trialDaysRemaining = subscriptionStatus === 'trialing' && stripeTrialEndsAt && stripeTrialEndsAt > now
       ? Math.ceil((stripeTrialEndsAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
-      : inAppTrialDaysRemaining;
+      : 0;
 
     const access = {
       hasAccess,
