@@ -1,4 +1,4 @@
-import { supabaseAdmin } from './supabaseClient.js';
+import { supabaseAdmin } from '../config/supabase.js';
 
 /**
  * Get user profile data

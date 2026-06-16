@@ -1,4 +1,5 @@
-import { supabaseAdmin } from './supabaseClient.js';
+import { supabaseAdmin } from '../config/supabase.js';
+import { MISSION_FIELDS, MISSION_FIELD_COUNT } from '../constants/missions.js';
 
 // Rank tiers configuration
 const RANK_TIERS = {
@@ -41,13 +42,12 @@ const calculateRank = (points) => {
 
 // Calculate points from daily missions
 const calculateMissionPoints = (missions) => {
-  const missionFields = ['sleep_completed', 'exercise_completed', 'sunlight_completed', 'diet_completed', 'alcohol_avoided', 'cold_exposure_completed', 'no_porn_masturbation'];
-  const completedMissions = missionFields.filter(field => missions[field]).length;
+  const completedMissions = MISSION_FIELDS.filter(field => missions[field]).length;
   
   let points = completedMissions * 5; // 5 points per mission (was 10)
   
-  // Perfect day bonus (all 7 missions completed)
-  if (completedMissions === 7) {
+  // Perfect day bonus (all missions completed)
+  if (completedMissions === MISSION_FIELD_COUNT) {
     points += 25; // 25 bonus (was 50)
   }
   
@@ -91,7 +91,7 @@ const getUserStreak = async (userId) => {
   try {
     const { data: missions, error } = await supabaseAdmin
       .from('daily_missions')
-      .select('date, sleep_completed, exercise_completed, sunlight_completed, diet_completed, alcohol_avoided, cold_exposure_completed, no_porn_masturbation')
+      .select(`date, ${MISSION_FIELDS.join(', ')}`)
       .eq('user_id', userId)
       .order('date', { ascending: false })
       .limit(30); // Check last 30 days
@@ -103,8 +103,7 @@ const getUserStreak = async (userId) => {
     
     for (let i = 0; i < missions.length; i++) {
       const mission = missions[i];
-      const missionFields = ['sleep_completed', 'exercise_completed', 'sunlight_completed', 'diet_completed', 'alcohol_avoided', 'cold_exposure_completed', 'no_porn_masturbation'];
-      const completedMissions = missionFields.filter(field => mission[field]).length;
+      const completedMissions = MISSION_FIELDS.filter(field => mission[field]).length;
       
       // Count as completed if at least 5 missions are done
       if (completedMissions >= 5) {
@@ -359,4 +358,22 @@ export const processDailyRankUpdate = async (userId, date, missions, lifestyleSc
     console.error('❌ Error processing daily rank update:', error);
     throw error;
   }
+};
+
+/** Fetch daily points row for a user and date (null if none). */
+export const getDailyPoints = async (userId, date) => {
+  const targetDate = date || new Date().toISOString().split('T')[0];
+
+  const { data: dailyPoints, error } = await supabaseAdmin
+    .from('daily_points')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('date', targetDate)
+    .single();
+
+  if (error && error.code !== 'PGRST116') {
+    throw error;
+  }
+
+  return dailyPoints || null;
 }; 

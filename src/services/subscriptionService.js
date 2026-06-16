@@ -1,5 +1,5 @@
-import { stripe, SUBSCRIPTION_CONFIG, getBaseUrl } from './stripeConfig.js';
-import { supabaseAdmin } from './supabaseClient.js';
+import { stripe, SUBSCRIPTION_CONFIG, getBaseUrl } from '../config/stripe.js';
+import { supabaseAdmin } from '../config/supabase.js';
 
 const hasPriorStripeSubscription = async (customerId) => {
   const subscriptions = await stripe.subscriptions.list({

@@ -1,6 +1,5 @@
 import axios from 'axios';
-
-const API_URL = 'http://192.168.0.232:3000';
+import { API_URL, TEST_EMAIL, TEST_PASSWORD } from './testConfig.js';
 
 // Debug progress saving issue
 async function debugProgressIssue() {
@@ -10,8 +9,8 @@ async function debugProgressIssue() {
     // First, authenticate
     console.log('1. Authenticating...');
     const signinResponse = await axios.post(`${API_URL}/auth/signin`, {
-      email: 'jesse.mashoana@gmail.com',
-      password: 'Marshall@32'
+      email: TEST_EMAIL,
+      password: TEST_PASSWORD
     });
 
     if (!signinResponse.data.session?.access_token) {

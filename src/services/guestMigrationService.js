@@ -1,16 +1,7 @@
-import { supabaseAdmin } from "./supabaseClient.js";
+import { supabaseAdmin } from '../config/supabase.js';
+import { MISSION_FIELDS } from '../constants/missions.js';
 
 const MAX_DATE_ROWS = 60;
-
-const MISSION_FIELDS = [
-  "sleep_completed",
-  "exercise_completed",
-  "sunlight_completed",
-  "diet_completed",
-  "alcohol_avoided",
-  "cold_exposure_completed",
-  "no_porn_masturbation",
-];
 
 const VALID_REPORT_DAYS = [
   "Sunday",

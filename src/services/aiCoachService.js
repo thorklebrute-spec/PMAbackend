@@ -1,4 +1,5 @@
-import { supabaseAdmin } from "./supabaseClient.js";
+import { supabaseAdmin } from '../config/supabase.js';
+import { MISSION_FIELDS } from '../constants/missions.js';
 
 const VALID_REPORT_DAYS = [
   "Sunday",
@@ -31,16 +32,6 @@ const PERSONA_PROMPTS = {
 const DAY_INDEX = Object.fromEntries(
   VALID_REPORT_DAYS.map((day, index) => [day, index]),
 );
-
-const REQUIRED_MISSION_FIELDS = [
-  "sleep_completed",
-  "exercise_completed",
-  "sunlight_completed",
-  "diet_completed",
-  "alcohol_avoided",
-  "cold_exposure_completed",
-  "no_porn_masturbation",
-];
 
 const toDateOnly = (date) => date.toISOString().split("T")[0];
 
@@ -90,19 +81,19 @@ const calculateMissionSummary = (dailyMissionRows, startDate, endDate) => {
   const dates = listWindowDates(startDate, endDate);
 
   let totalCompletedChecks = 0;
-  const totalChecks = dates.length * REQUIRED_MISSION_FIELDS.length;
+  const totalChecks = dates.length * MISSION_FIELDS.length;
   let fullyCompletedDays = 0;
   let runningStreak = 0;
 
   const missionTotals = Object.fromEntries(
-    REQUIRED_MISSION_FIELDS.map((field) => [field, 0]),
+    MISSION_FIELDS.map((field) => [field, 0]),
   );
 
   const normalizedDaily = dates.map((date) => {
     const row = byDate.get(date) || {};
     let completedCount = 0;
     const missionStates = {};
-    for (const field of REQUIRED_MISSION_FIELDS) {
+    for (const field of MISSION_FIELDS) {
       const done = Boolean(row[field]);
       missionStates[field] = done;
       if (done) {
@@ -111,7 +102,7 @@ const calculateMissionSummary = (dailyMissionRows, startDate, endDate) => {
       }
     }
     totalCompletedChecks += completedCount;
-    const allDone = completedCount === REQUIRED_MISSION_FIELDS.length;
+    const allDone = completedCount === MISSION_FIELDS.length;
     if (allDone) fullyCompletedDays += 1;
     return { date, completedCount, allDone, missions: missionStates };
   });
@@ -129,7 +120,7 @@ const calculateMissionSummary = (dailyMissionRows, startDate, endDate) => {
     streak: runningStreak,
   };
 
-  const habitRates = REQUIRED_MISSION_FIELDS.map((field) => ({
+  const habitRates = MISSION_FIELDS.map((field) => ({
     mission: field,
     completionRate: Math.round((missionTotals[field] / normalizedDaily.length) * 100),
   }));

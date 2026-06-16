@@ -6,16 +6,14 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node test-auth.js",
-    "test:auth": "node test-auth.js",
-    "test:progress": "node test-progress.js",
-    "test:daily-missions": "node test-daily-missions.js",
-    "test:modular": "node test-daily-missions-modular.js",
-    "test:subscription": "node test-subscription.js",
-    "test:progress-saving": "node test-progress-saving.js",
-    "test:mission-unchecking": "node test-mission-unchecking.js",
-    "debug:progress": "node debug-progress-issue.js",
-    "test:stripe": "node test-stripe-integration.js"
+    "test:modular": "node tests/test-daily-missions-modular.js",
+    "test:subscription": "node tests/test-subscription.js",
+    "test:progress-saving": "node tests/test-progress-saving.js",
+    "test:mission-unchecking": "node tests/test-mission-unchecking.js",
+    "test:rank": "node tests/test-rank-system.js",
+    "test:populate": "node tests/test-populate-progress.js",
+    "test:stripe": "node tests/test-stripe-integration.js",
+    "debug:progress": "node tests/debug-progress-issue.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",
@@ -26,6 +24,7 @@
     "stripe": "^14.17.0"
   },
   "devDependencies": {
+    "axios": "^1.17.0",
     "supabase": "^2.30.4"
   }
 }
