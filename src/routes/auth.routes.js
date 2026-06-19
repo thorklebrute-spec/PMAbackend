@@ -256,8 +256,8 @@ router.get('/auth/email-confirmed', (req, res) => {
   </body></html>`);
 });
 
-// Mobile OAuth callback - serves an HTML page that reads tokens from the
-// URL fragment and redirects to the Expo app via deep link
+// Mobile OAuth callback - reads tokens from Supabase URL hash and redirects
+// to the app via deep link using query params (Android strips URL fragments).
 router.get('/auth/mobile-callback', (req, res) => {
   const appRedirect = req.query.appRedirect || 'exp://';
   res.send(`<!DOCTYPE html><html><head><title>Signing in...</title></head><body>
@@ -265,7 +265,9 @@ router.get('/auth/mobile-callback', (req, res) => {
     <script>
       const hash = window.location.hash.substring(1);
       if (hash) {
-        window.location.href = decodeURIComponent("${encodeURIComponent(appRedirect)}") + "#" + hash;
+        const appUrl = decodeURIComponent("${encodeURIComponent(appRedirect)}");
+        const separator = appUrl.includes("?") ? "&" : "?";
+        window.location.href = appUrl + separator + hash;
       } else {
         document.body.innerHTML = "<p>Authentication failed. Please close this and try again.</p>";
       }
