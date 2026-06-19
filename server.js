@@ -89,7 +89,8 @@ app.use((req, res, next) => {
   if (req.body && Object.keys(req.body).length > 0) {
     console.log('Request body:', {
       ...req.body,
-      password: req.body.password ? '[REDACTED]' : undefined
+      password: req.body.password ? '[REDACTED]' : undefined,
+      access_token: req.body.access_token ? 'present' : undefined,
     });
   }
   next();
@@ -246,6 +247,106 @@ app.post('/auth/refresh', async (req, res) => {
       details: error.details
     });
     res.status(400).json({ error: error.message || 'Failed to refresh session' });
+  }
+});
+
+app.post('/auth/forgot-password', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ error: 'Invalid email format' });
+    }
+
+    const baseUrl = process.env.RENDER_EXTERNAL_URL || `${req.protocol}://${req.get('host')}`;
+    const redirectTo = `${baseUrl}/auth/mobile-callback?appRedirect=${encodeURIComponent('primalmale://reset-password')}`;
+
+    console.log('Sending password reset email to:', email);
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
+
+    if (error) {
+      console.error('Forgot password error:', error.message);
+      if (error.message?.toLowerCase().includes('rate limit')) {
+        return res.status(429).json({ error: 'Too many reset requests. Please try again later.' });
+      }
+    }
+
+    console.log('Password reset email request processed for:', email);
+    res.json({
+      message: 'If an account exists for this email, a password reset link has been sent.',
+    });
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    res.status(500).json({ error: 'Failed to process password reset request' });
+  }
+});
+
+app.post('/auth/reset-password', async (req, res) => {
+  try {
+    const { password, access_token } = req.body;
+    if (!password || !access_token) {
+      return res.status(400).json({ error: 'Password and access_token are required' });
+    }
+
+    if (password.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters long' });
+    }
+
+    const { data: { user }, error: userError } = await supabase.auth.getUser(access_token);
+    if (userError || !user) {
+      return res.status(401).json({
+        error: 'Invalid or expired reset link. Please request a new password reset email.',
+      });
+    }
+
+    const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(user.id, {
+      password,
+    });
+
+    if (updateError) {
+      return res.status(400).json({ error: updateError.message || 'Failed to reset password' });
+    }
+
+    res.json({ message: 'Password updated successfully' });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    res.status(500).json({ error: 'Failed to reset password' });
+  }
+});
+
+app.post('/auth/resend-confirmation', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    const baseUrl = process.env.RENDER_EXTERNAL_URL || `${req.protocol}://${req.get('host')}`;
+    const { error } = await supabase.auth.resend({
+      type: 'signup',
+      email,
+      options: {
+        emailRedirectTo: `${baseUrl}/auth/email-confirmed`,
+      },
+    });
+
+    if (error) {
+      console.error('Resend confirmation error:', error.message);
+      if (error.message?.toLowerCase().includes('rate limit')) {
+        return res.status(429).json({ error: 'Too many requests. Please try again later.' });
+      }
+    }
+
+    res.json({
+      message: 'If an account exists and is unconfirmed, a confirmation email has been sent.',
+    });
+  } catch (error) {
+    console.error('Resend confirmation error:', error);
+    res.status(500).json({ error: 'Failed to resend confirmation email' });
   }
 });
 
