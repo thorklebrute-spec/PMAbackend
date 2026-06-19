@@ -1,6 +1,5 @@
 import axios from 'axios';
-
-const API_URL = 'http://192.168.0.232:3000';
+import { API_URL, TEST_EMAIL, TEST_PASSWORD } from './testConfig.js';
 
 // Test subscription system
 async function testSubscriptionSystem() {
@@ -10,8 +9,8 @@ async function testSubscriptionSystem() {
     // First, we need to get a valid token by signing in
     console.log('1. Testing authentication...');
     const signinResponse = await axios.post(`${API_URL}/auth/signin`, {
-      email: 'jesse.mashoana@gmail.com',
-      password: 'Marshall@32'
+      email: TEST_EMAIL,
+      password: TEST_PASSWORD
     });
 
     if (!signinResponse.data.session?.access_token) {

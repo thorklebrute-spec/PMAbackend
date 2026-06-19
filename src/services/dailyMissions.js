@@ -1,4 +1,5 @@
-import { supabaseAdmin } from './supabaseClient.js';
+import { supabaseAdmin } from '../config/supabase.js';
+import { MISSION_FIELDS } from '../constants/missions.js';
 
 // Get user's daily missions for the last 7 days
 export const getDailyMissions = async (userId) => {
@@ -51,13 +52,9 @@ export const saveDailyMissions = async (userId, date, missions) => {
     const missionData = {
       user_id: userId,
       date: date,
-      sleep_completed: missions.sleep_completed || false,
-      exercise_completed: missions.exercise_completed || false,
-      sunlight_completed: missions.sunlight_completed || false,
-      diet_completed: missions.diet_completed || false,
-      alcohol_avoided: missions.alcohol_avoided || false,
-      cold_exposure_completed: missions.cold_exposure_completed || false,
-      no_porn_masturbation: missions.no_porn_masturbation || false
+      ...Object.fromEntries(
+        MISSION_FIELDS.map((field) => [field, missions[field] || false])
+      ),
     };
     
     console.log('Prepared mission data:', missionData);
@@ -199,9 +196,7 @@ export const checkMissionsCompleted = async (userId, date) => {
       return false; // No missions recorded for this date
     }
 
-    // Check if all required missions are completed (including the new No FAP mission)
-    const requiredMissions = ['sleep_completed', 'exercise_completed', 'sunlight_completed', 'diet_completed', 'alcohol_avoided', 'cold_exposure_completed', 'no_porn_masturbation'];
-    const allCompleted = requiredMissions.every(mission => data[mission] === true);
+    const allCompleted = MISSION_FIELDS.every((field) => data[field] === true);
 
     return allCompleted;
   } catch (error) {

@@ -1,0 +1,156 @@
+:root {
+  --bg: #121212;
+  --card: #1b1b1b;
+  --text: #ffffff;
+  --muted: #a0aec0;
+  --border: #2a2a2a;
+  --accent: #03aed2;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+.page {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 28px 16px 60px;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  backdrop-filter: blur(10px);
+  background: rgba(18, 18, 18, 0.88);
+  border-bottom: 1px solid var(--border);
+}
+
+.topbar-inner {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.brand-mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: rgba(3, 174, 210, 0.16);
+  border: 1px solid rgba(3, 174, 210, 0.4);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
+.nav {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.nav a {
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 8px 12px;
+}
+
+.nav a:hover {
+  color: var(--text);
+  border-color: rgba(3, 174, 210, 0.5);
+  text-decoration: none;
+}
+
+.hero {
+  margin-top: 18px;
+  padding: 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(3, 174, 210, 0.26);
+  background: linear-gradient(180deg, rgba(3, 174, 210, 0.1), rgba(3, 174, 210, 0.02));
+}
+
+.title {
+  margin: 0;
+  font-size: 26px;
+  line-height: 1.2;
+}
+
+.subtitle {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.card {
+  margin-top: 16px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 18px;
+}
+
+.card h2 {
+  margin: 18px 0 8px;
+  font-size: 16px;
+}
+
+.card p,
+.card li {
+  color: #e9e9e9;
+  font-size: 14px;
+  line-height: 1.64;
+}
+
+.card ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.meta {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.footer-note {
+  margin-top: 18px;
+  color: var(--muted);
+  font-size: 12px;
+}

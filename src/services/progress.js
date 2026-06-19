@@ -1,4 +1,25 @@
-import { supabaseAdmin } from './supabaseClient.js';
+import { supabaseAdmin } from '../config/supabase.js';
+import { MISSION_FIELDS } from '../constants/missions.js';
+
+// Map health_data labels to metric keys and base units for frontend conversion
+const LABEL_TO_METRIC = {
+  'Testosterone': { metric: 'testosterone', baseUnit: 'ng/dL' },
+  'Sperm Count': { metric: 'spermCount', baseUnit: 'm/mL' },
+  'Strength': { metric: 'strength', baseUnit: 'kg' }
+};
+
+export const enrichHealthDataForUnits = (healthData) => {
+  if (!Array.isArray(healthData)) return healthData;
+  return healthData.map(item => {
+    const meta = LABEL_TO_METRIC[item.label] || { metric: item.label?.toLowerCase?.()?.replace(/\s/g, '') || 'unknown', baseUnit: null };
+    return {
+      ...item,
+      metric: meta.metric,
+      numericValue: parseFloat(item.value) || 0,
+      baseUnit: meta.baseUnit
+    };
+  });
+};
 
 // Cap daily improvements for each metric
 const MAX_DAILY_IMPROVEMENTS = {
@@ -94,11 +115,10 @@ export const checkAndSaveDailyProgress = async (userId, date, missions, onboardi
     console.log('- Onboarding data available:', !!onboardingData);
     
     // Check if all missions are completed
-    const requiredMissions = ['sleep_completed', 'exercise_completed', 'sunlight_completed', 'diet_completed', 'alcohol_avoided', 'cold_exposure_completed', 'no_porn_masturbation'];
-    const allCompleted = requiredMissions.every(mission => missions[mission] === true);
+    const allCompleted = MISSION_FIELDS.every(mission => missions[mission] === true);
 
-    console.log('Required missions:', requiredMissions);
-    console.log('Mission completion status:', requiredMissions.map(mission => `${mission}: ${missions[mission]}`));
+    console.log('Required missions:', MISSION_FIELDS);
+    console.log('Mission completion status:', MISSION_FIELDS.map(mission => `${mission}: ${missions[mission]}`));
     console.log('All completed:', allCompleted);
 
     if (!allCompleted) {

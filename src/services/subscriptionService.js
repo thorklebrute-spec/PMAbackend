@@ -1,5 +1,15 @@
-import { stripe, SUBSCRIPTION_CONFIG, getBaseUrl } from './stripeConfig.js';
-import { supabaseAdmin } from './supabaseClient.js';
+import { stripe, SUBSCRIPTION_CONFIG, getBaseUrl } from '../config/stripe.js';
+import { supabaseAdmin } from '../config/supabase.js';
+
+const hasPriorStripeSubscription = async (customerId) => {
+  const subscriptions = await stripe.subscriptions.list({
+    customer: customerId,
+    status: 'all',
+    limit: 1,
+  });
+
+  return subscriptions.data.length > 0;
+};
 
 // Create a Stripe customer
 export const createStripeCustomer = async (userId, email, name = null) => {
@@ -59,6 +69,21 @@ export const getOrCreateStripeCustomer = async (userId, email, name = null) => {
 export const createSubscriptionCheckout = async (userId, email, name = null) => {
   try {
     const customer = await getOrCreateStripeCustomer(userId, email, name);
+    const hasUsedStripeBefore = await hasPriorStripeSubscription(customer.id);
+    const eligibleForTrial = !hasUsedStripeBefore;
+
+    const subscriptionData = {
+      metadata: {
+        userId: userId,
+      },
+    };
+
+    if (eligibleForTrial) {
+      subscriptionData.trial_period_days = Number(SUBSCRIPTION_CONFIG.TRIAL_DAYS) || 0;
+    } else {
+      // Do not inherit a trial from the Stripe Price for ineligible users.
+      subscriptionData.trial_from_plan = false;
+    }
 
     const session = await stripe.checkout.sessions.create({
       customer: customer.id,
@@ -70,12 +95,7 @@ export const createSubscriptionCheckout = async (userId, email, name = null) => 
         },
       ],
       mode: 'subscription',
-      subscription_data: {
-        trial_period_days: SUBSCRIPTION_CONFIG.TRIAL_DAYS,
-        metadata: {
-          userId: userId,
-        },
-      },
+      subscription_data: subscriptionData,
       success_url: `${SUBSCRIPTION_CONFIG.SUCCESS_URL}?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: SUBSCRIPTION_CONFIG.CANCEL_URL,
       metadata: {
