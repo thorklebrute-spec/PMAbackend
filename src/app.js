@@ -27,6 +27,7 @@ app.use('/policy', express.static(policyDir, { index: 'index.html' }));
  * GET  /policy/                   Legal policy hub
  * GET  /policy/privacy-policy.html Play Store privacy policy
  * GET  /policy/terms-and-conditions.html Terms of use
+ * GET  /policy/delete-account.html Account deletion instructions (Play Store)
  * POST /auth/*                    Signup, signin, OAuth, session
  * GET  /auth/user                 Current user + access + onboarding flags
  * POST /ai/coach/weekly-report    AI coach report
