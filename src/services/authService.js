@@ -1,5 +1,5 @@
 import { supabaseAdmin } from '../config/supabase.js';
-import { getSubscriptionStatus } from './subscriptionService.js';
+import { getSubscriptionStatus, hasPriorStripeSubscription } from './subscriptionService.js';
 
 /**
  * Build the GET /auth/user payload: user profile, subscription access, onboarding flags.
@@ -20,7 +20,7 @@ export const getAuthUserPayload = async (userId) => {
 
   const { data: profile, error: profileError } = await supabaseAdmin
     .from('user_profiles')
-    .select('subscription_status, onboarding_data')
+    .select('subscription_status, onboarding_data, guest_trial_started_at, stripe_customer_id')
     .eq('id', user.id)
     .single();
 
@@ -42,9 +42,20 @@ export const getAuthUserPayload = async (userId) => {
   const subscriptionActive = ['active', 'trialing'].includes(subscriptionStatus);
   const hasAccess = subscriptionActive;
   const trialActive = subscriptionStatus === 'trialing';
+  const guestTrialUsed = Boolean(profile?.guest_trial_started_at);
+  let stripeTrialEligible = !guestTrialUsed;
+  if (stripeTrialEligible && profile?.stripe_customer_id) {
+    try {
+      stripeTrialEligible = !(await hasPriorStripeSubscription(profile.stripe_customer_id));
+    } catch (priorSubError) {
+      console.warn('Could not check prior Stripe subscription:', priorSubError.message);
+    }
+  }
   const reason = subscriptionActive
     ? (subscriptionStatus === 'trialing' ? 'trial_active' : 'subscription_active')
-    : 'no_access';
+    : guestTrialUsed
+      ? 'guest_trial_consumed'
+      : 'no_access';
   const trialDaysRemaining = subscriptionStatus === 'trialing' && stripeTrialEndsAt && stripeTrialEndsAt > now
     ? Math.ceil((stripeTrialEndsAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
     : 0;
@@ -56,6 +67,8 @@ export const getAuthUserPayload = async (userId) => {
     trialActive,
     trialDaysRemaining,
     trialEndsAt: stripeTrialEndsAt ? stripeTrialEndsAt.toISOString() : null,
+    guestTrialUsed,
+    stripeTrialEligible,
   };
 
   const hasOnboardingData = Boolean(

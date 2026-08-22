@@ -1,7 +1,8 @@
 import { stripe, SUBSCRIPTION_CONFIG, getBaseUrl } from '../config/stripe.js';
 import { supabaseAdmin } from '../config/supabase.js';
+import { ensureUserProfile } from './profileBootstrapService.js';
 
-const hasPriorStripeSubscription = async (customerId) => {
+export const hasPriorStripeSubscription = async (customerId) => {
   const subscriptions = await stripe.subscriptions.list({
     customer: customerId,
     status: 'all',
@@ -9,6 +10,16 @@ const hasPriorStripeSubscription = async (customerId) => {
   });
 
   return subscriptions.data.length > 0;
+};
+
+export const isEligibleForStripeTrial = async (profile, customerId) => {
+  if (profile?.guest_trial_started_at) {
+    return false;
+  }
+  if (!customerId) {
+    return true;
+  }
+  return !(await hasPriorStripeSubscription(customerId));
 };
 
 // Create a Stripe customer
@@ -25,11 +36,14 @@ export const createStripeCustomer = async (userId, email, name = null) => {
     // Store customer ID in user_profiles table
     await supabaseAdmin
       .from('user_profiles')
-      .update({ 
-        stripe_customer_id: customer.id,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', userId);
+      .upsert(
+        [{
+          id: userId,
+          stripe_customer_id: customer.id,
+          updated_at: new Date().toISOString(),
+        }],
+        { onConflict: 'id' }
+      );
 
     return customer;
   } catch (error) {
@@ -68,9 +82,19 @@ export const getOrCreateStripeCustomer = async (userId, email, name = null) => {
 // Create checkout session for subscription
 export const createSubscriptionCheckout = async (userId, email, name = null) => {
   try {
+    await ensureUserProfile(userId);
+
     const customer = await getOrCreateStripeCustomer(userId, email, name);
-    const hasUsedStripeBefore = await hasPriorStripeSubscription(customer.id);
-    const eligibleForTrial = !hasUsedStripeBefore;
+
+    const { data: profile, error: profileError } = await supabaseAdmin
+      .from('user_profiles')
+      .select('guest_trial_started_at, stripe_customer_id')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (profileError) throw profileError;
+
+    const eligibleForTrial = await isEligibleForStripeTrial(profile, customer.id);
 
     const subscriptionData = {
       metadata: {
@@ -81,7 +105,6 @@ export const createSubscriptionCheckout = async (userId, email, name = null) => 
     if (eligibleForTrial) {
       subscriptionData.trial_period_days = Number(SUBSCRIPTION_CONFIG.TRIAL_DAYS) || 0;
     } else {
-      // Do not inherit a trial from the Stripe Price for ineligible users.
       subscriptionData.trial_from_plan = false;
     }
 
@@ -96,7 +119,7 @@ export const createSubscriptionCheckout = async (userId, email, name = null) => 
       ],
       mode: 'subscription',
       subscription_data: subscriptionData,
-      success_url: `${SUBSCRIPTION_CONFIG.SUCCESS_URL}?session_id={CHECKOUT_SESSION_ID}`,
+      success_url: SUBSCRIPTION_CONFIG.SUCCESS_URL,
       cancel_url: SUBSCRIPTION_CONFIG.CANCEL_URL,
       metadata: {
         userId: userId,
@@ -147,6 +170,9 @@ export const getSubscriptionStatus = async (userId) => {
       .single();
 
     if (error) {
+      if (error.code === 'PGRST116') {
+        return { status: 'no_subscription', subscription: null };
+      }
       throw error;
     }
 

@@ -2,12 +2,13 @@ import { Router } from 'express';
 import { supabase, supabaseAdmin, signUpWithEmail, signInWithEmail, signInWithGoogle, signOut } from '../config/supabase.js';
 import { getAuthUserPayload } from '../services/authService.js';
 import { authenticateToken } from '../middleware/auth.js';
+import { ensureUserProfile, recordGuestTrialStartedAt } from '../services/profileBootstrapService.js';
 
 const router = Router();
 
 router.post('/auth/signup', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, guestTrialStartedAt } = req.body;
     if (!email || !password) {
       console.log('Signup failed: Missing email or password');
       return res.status(400).json({ error: 'Email and password are required' });
@@ -30,6 +31,11 @@ router.post('/auth/signup', async (req, res) => {
     if (!result.user) {
       console.log('Signup failed: No user data returned');
       return res.status(400).json({ error: 'Failed to create user' });
+    }
+
+    await ensureUserProfile(result.user.id);
+    if (guestTrialStartedAt !== undefined && guestTrialStartedAt !== null) {
+      await recordGuestTrialStartedAt(result.user.id, guestTrialStartedAt);
     }
 
     console.log('Signup successful:', {
@@ -60,7 +66,7 @@ router.post('/auth/signup', async (req, res) => {
 
 router.post('/auth/signin', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, guestTrialStartedAt } = req.body;
     if (!email || !password) {
       console.log('Signin failed: Missing email or password');
       return res.status(400).json({ error: 'Email and password are required' });
@@ -100,6 +106,13 @@ router.post('/auth/signin', async (req, res) => {
         expires_at: result.session.expires_at
       } : null
     });
+
+    if (result.user) {
+      await ensureUserProfile(result.user.id);
+      if (guestTrialStartedAt !== undefined && guestTrialStartedAt !== null) {
+        await recordGuestTrialStartedAt(result.user.id, guestTrialStartedAt);
+      }
+    }
     
     res.json(result);
   } catch (error) {
@@ -348,6 +361,22 @@ router.get('/auth/callback', async (req, res) => {
     res.send(`<!DOCTYPE html><html><head><title>Sign In Failed</title></head><body style="display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;background:#121212;color:#fff;">
       <div style="text-align:center"><h1>Sign In Failed</h1><p>${error.message}</p></div>
     </body></html>`);
+  }
+});
+
+router.post('/auth/sync-guest-trial', authenticateToken, async (req, res) => {
+  try {
+    const { guestTrialStartedAt } = req.body;
+    if (guestTrialStartedAt === undefined || guestTrialStartedAt === null) {
+      return res.status(400).json({ error: 'guestTrialStartedAt is required' });
+    }
+
+    await ensureUserProfile(req.user.id);
+    const result = await recordGuestTrialStartedAt(req.user.id, guestTrialStartedAt);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Sync guest trial error:', error);
+    res.status(400).json({ error: error.message || 'Failed to sync guest trial' });
   }
 });
 
