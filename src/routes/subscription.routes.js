@@ -1,15 +1,12 @@
 import { Router } from 'express';
-import express from 'express';
 import {
   createSubscriptionCheckout,
   createCustomerPortalSession,
   getSubscriptionStatus,
   cancelSubscription,
   reactivateSubscription,
-  handleWebhookEvent
 } from '../services/subscriptionService.js';
 import { requireSubscription } from '../middleware/subscription.js';
-import { stripe } from '../config/stripe.js';
 import { authenticateToken } from '../middleware/auth.js';
 
 const router = Router();
@@ -68,29 +65,6 @@ router.post('/subscription/reactivate', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Error reactivating subscription:', error);
     res.status(500).json({ error: error.message || 'Failed to reactivate subscription' });
-  }
-});
-
-// Stripe webhook endpoint
-router.post('/webhook/stripe', express.raw({ type: 'application/json' }), async (req, res) => {
-  const sig = req.headers['stripe-signature'];
-  const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
-
-  let event;
-
-  try {
-    event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
-  } catch (err) {
-    console.error('Webhook signature verification failed:', err.message);
-    return res.status(400).send(`Webhook Error: ${err.message}`);
-  }
-
-  try {
-    await handleWebhookEvent(event);
-    res.json({ received: true });
-  } catch (error) {
-    console.error('Error handling webhook event:', error);
-    res.status(500).json({ error: 'Webhook handler failed' });
   }
 });
 

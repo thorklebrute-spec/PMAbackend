@@ -3,6 +3,8 @@ import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import mountRoutes from './routes/index.js';
+import { stripe } from './config/stripe.js';
+import { handleWebhookEvent } from './services/subscriptionService.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const policyDir = path.join(__dirname, '..', 'public', 'policy');
@@ -16,6 +18,31 @@ app.use(cors({
   exposedHeaders: ['Authorization'],
   credentials: true
 }));
+
+app.post(
+  '/webhook/stripe',
+  express.raw({ type: 'application/json' }),
+  async (req, res) => {
+    const sig = req.headers['stripe-signature'];
+    const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+    let event;
+    try {
+      event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
+    } catch (err) {
+      console.error('Webhook signature verification failed:', err.message);
+      return res.status(400).send(`Webhook Error: ${err.message}`);
+    }
+
+    try {
+      await handleWebhookEvent(event);
+      res.json({ received: true });
+    } catch (error) {
+      console.error('Error handling webhook event:', error);
+      res.status(500).json({ error: 'Webhook handler failed' });
+    }
+  }
+);
 
 app.use(express.json());
 app.use('/policy', express.static(policyDir, { index: 'index.html' }));
@@ -48,7 +75,7 @@ app.use('/policy', express.static(policyDir, { index: 'index.html' }));
 
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
-  if (req.body && Object.keys(req.body).length > 0) {
+  if (req.path !== '/webhook/stripe' && req.body && Object.keys(req.body).length > 0) {
     console.log('Request body:', {
       ...req.body,
       password: req.body.password ? '[REDACTED]' : undefined
