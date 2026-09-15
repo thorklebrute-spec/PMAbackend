@@ -3,6 +3,7 @@ import { supabase, supabaseAdmin, signUpWithEmail, signInWithEmail, signInWithGo
 import { getAuthUserPayload } from '../services/authService.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { ensureUserProfile, recordGuestTrialStartedAt } from '../services/profileBootstrapService.js';
+import { stripe } from '../config/stripe.js';
 
 const router = Router();
 
@@ -377,6 +378,98 @@ router.post('/auth/sync-guest-trial', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Sync guest trial error:', error);
     res.status(400).json({ error: error.message || 'Failed to sync guest trial' });
+  }
+});
+
+const cancelStripeSubscriptions = async (userId) => {
+  try {
+    const { data: profile, error } = await supabaseAdmin
+      .from('user_profiles')
+      .select('stripe_customer_id, subscription_id')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (error && error.code !== 'PGRST116') {
+      console.warn('Could not load profile before account deletion:', error.message);
+    }
+
+    const subscriptionIds = new Set();
+    if (profile?.subscription_id) {
+      subscriptionIds.add(profile.subscription_id);
+    }
+
+    if (profile?.stripe_customer_id) {
+      const listed = await stripe.subscriptions.list({
+        customer: profile.stripe_customer_id,
+        status: 'all',
+        limit: 20,
+      });
+      for (const subscription of listed.data) {
+        if (!['canceled', 'incomplete_expired'].includes(subscription.status)) {
+          subscriptionIds.add(subscription.id);
+        }
+      }
+    }
+
+    for (const subscriptionId of subscriptionIds) {
+      try {
+        await stripe.subscriptions.cancel(subscriptionId);
+      } catch (stripeError) {
+        const missing = stripeError?.code === 'resource_missing'
+          || stripeError?.raw?.code === 'resource_missing';
+        if (!missing) {
+          console.warn(`Stripe cancel failed for ${subscriptionId}:`, stripeError.message);
+        }
+      }
+    }
+  } catch (error) {
+    console.warn('Stripe cancel skipped during account deletion:', error.message);
+  }
+};
+
+const deleteProfileUploads = async (userId) => {
+  try {
+    const folder = `profile-pictures/${userId}`;
+    const { data, error } = await supabaseAdmin.storage
+      .from('user-uploads')
+      .list(folder, { limit: 100 });
+
+    if (error) {
+      console.warn('Could not list profile uploads before account deletion:', error.message);
+      return;
+    }
+
+    const paths = (data || [])
+      .filter((file) => file.name && file.name !== '.emptyFolderPlaceholder')
+      .map((file) => `${folder}/${file.name}`);
+
+    if (!paths.length) return;
+
+    const { error: removeError } = await supabaseAdmin.storage
+      .from('user-uploads')
+      .remove(paths);
+
+    if (removeError) {
+      console.warn('Could not remove profile uploads before account deletion:', removeError.message);
+    }
+  } catch (error) {
+    console.warn('Profile upload cleanup skipped during account deletion:', error.message);
+  }
+};
+
+router.post('/auth/delete-account', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    await cancelStripeSubscriptions(userId);
+    await deleteProfileUploads(userId);
+
+    const { error } = await supabaseAdmin.auth.admin.deleteUser(userId);
+    if (error) throw error;
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Delete account error:', error);
+    res.status(400).json({ error: error.message || 'Failed to delete account' });
   }
 });
 
