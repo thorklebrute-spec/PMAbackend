@@ -38,6 +38,25 @@ router.post('/subscription/portal', authenticateToken, async (req, res) => {
   }
 });
 
+router.post('/subscription/apple/verify', authenticateToken, async (req, res) => {
+  try {
+    const { signedTransactionInfo, purchaseToken } = req.body || {};
+    const jws = signedTransactionInfo || purchaseToken;
+    if (!jws) {
+      return res.status(400).json({ error: 'signedTransactionInfo is required' });
+    }
+
+    const { verifyApplePurchaseForUser } = await import(
+      '../services/appleSubscriptionService.js'
+    );
+    const result = await verifyApplePurchaseForUser(req.user.id, jws);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Error verifying Apple purchase:', error);
+    res.status(400).json({ error: error.message || 'Failed to verify Apple purchase' });
+  }
+});
+
 router.get('/subscription/status', authenticateToken, async (req, res) => {
   try {
     const subscription = await getSubscriptionStatus(req.user.id);

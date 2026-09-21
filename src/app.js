@@ -44,6 +44,28 @@ app.post(
   }
 );
 
+app.post(
+  '/webhook/apple',
+  express.json({ type: '*/*' }),
+  async (req, res) => {
+    try {
+      const signedPayload = req.body?.signedPayload || req.body?.signed_payload;
+      if (!signedPayload) {
+        return res.status(400).json({ error: 'signedPayload is required' });
+      }
+
+      const { handleAppleServerNotification } = await import(
+        './services/appleSubscriptionService.js'
+      );
+      const result = await handleAppleServerNotification(signedPayload);
+      res.json({ received: true, ...result });
+    } catch (error) {
+      console.error('Error handling Apple webhook:', error);
+      res.status(400).json({ error: error.message || 'Apple webhook handler failed' });
+    }
+  }
+);
+
 app.use(express.json());
 app.use('/policy', express.static(policyDir, { index: 'index.html' }));
 
@@ -67,15 +89,16 @@ app.use('/policy', express.static(policyDir, { index: 'index.html' }));
  * GET  /lifestyle/score           Latest lifestyle score
  * GET|POST /daily-missions*       Mission CRUD + stats
  * GET|POST /progress*             Progress tracking
- * POST /subscription/*            Stripe checkout / portal / status
+ * POST /subscription/*            Stripe + Apple verify / portal / status
  * POST /webhook/stripe            Stripe webhooks
+ * POST /webhook/apple             App Store Server Notifications V2
  * GET  /rank*                     Rank, leaderboard, daily points
  * GET|PUT|POST|DELETE /profile*   Profile + picture
  */
 
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
-  if (req.path !== '/webhook/stripe' && req.body && Object.keys(req.body).length > 0) {
+  if (req.path !== '/webhook/stripe' && req.path !== '/webhook/apple' && req.body && Object.keys(req.body).length > 0) {
     console.log('Request body:', {
       ...req.body,
       password: req.body.password ? '[REDACTED]' : undefined

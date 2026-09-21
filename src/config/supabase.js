@@ -163,6 +163,59 @@ export const signInWithGoogle = async (redirectUrl) => {
   }
 };
 
+export const signInWithAppleIdToken = async (identityToken, fullName = null) => {
+  try {
+    if (!identityToken) {
+      throw new Error('Apple identity token is required');
+    }
+
+    const { data, error } = await supabaseAdmin.auth.signInWithIdToken({
+      provider: 'apple',
+      token: identityToken,
+    });
+
+    if (error) throw error;
+    if (!data?.user) {
+      throw new Error('Failed to sign in with Apple');
+    }
+
+    const given = fullName?.givenName || fullName?.given_name;
+    const family = fullName?.familyName || fullName?.family_name;
+    const displayName = [given, family].filter(Boolean).join(' ').trim();
+
+    if (displayName) {
+      const existingMeta = data.user.user_metadata || {};
+      if (!existingMeta.full_name && !existingMeta.name) {
+        const { data: updated, error: updateError } = await supabaseAdmin.auth.admin.updateUserById(
+          data.user.id,
+          {
+            user_metadata: {
+              ...existingMeta,
+              full_name: displayName,
+              name: displayName,
+              given_name: given || existingMeta.given_name,
+              family_name: family || existingMeta.family_name,
+            },
+          }
+        );
+        if (updateError) {
+          console.warn('Could not store Apple display name:', updateError.message);
+        } else if (updated?.user) {
+          data.user = updated.user;
+        }
+      }
+    }
+
+    return {
+      user: data.user,
+      session: data.session || null,
+    };
+  } catch (error) {
+    console.error('Supabase Apple signin error:', error);
+    throw error;
+  }
+};
+
 export const signOut = async () => {
   try {
     const { error } = await supabase.auth.signOut();

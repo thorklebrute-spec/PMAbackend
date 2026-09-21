@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { supabase, supabaseAdmin, signUpWithEmail, signInWithEmail, signInWithGoogle, signOut } from '../config/supabase.js';
+import { supabase, supabaseAdmin, signUpWithEmail, signInWithEmail, signInWithGoogle, signInWithAppleIdToken, signOut } from '../config/supabase.js';
 import { getAuthUserPayload } from '../services/authService.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { ensureUserProfile, recordGuestTrialStartedAt } from '../services/profileBootstrapService.js';
@@ -341,6 +341,45 @@ router.post('/auth/google', async (req, res) => {
       details: error.details
     });
     res.status(400).json({ error: error.message || 'Google authentication failed' });
+  }
+});
+
+router.post('/auth/apple', async (req, res) => {
+  try {
+    const { identityToken, fullName } = req.body || {};
+    if (!identityToken) {
+      return res.status(400).json({ error: 'Apple identity token is required' });
+    }
+
+    console.log('Attempting Apple signin');
+    const result = await signInWithAppleIdToken(identityToken, fullName);
+
+    if (!result.user) {
+      return res.status(400).json({ error: 'Failed to sign in with Apple' });
+    }
+
+    await ensureUserProfile(result.user.id);
+
+    console.log('Apple signin successful:', {
+      user: {
+        id: result.user.id,
+        email: result.user.email,
+      },
+      session: result.session ? {
+        access_token: result.session.access_token ? 'present' : 'missing',
+        refresh_token: result.session.refresh_token ? 'present' : 'missing',
+        expires_at: result.session.expires_at,
+      } : null,
+    });
+
+    res.json(result);
+  } catch (error) {
+    console.error('Apple auth error:', {
+      message: error.message,
+      code: error.code,
+      details: error.details,
+    });
+    res.status(400).json({ error: error.message || 'Apple authentication failed' });
   }
 });
 

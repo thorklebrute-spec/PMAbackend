@@ -20,7 +20,9 @@ export const getAuthUserPayload = async (userId) => {
 
   const { data: profile, error: profileError } = await supabaseAdmin
     .from('user_profiles')
-    .select('subscription_status, onboarding_data, guest_trial_started_at, stripe_customer_id')
+    .select(
+      'subscription_status, onboarding_data, guest_trial_started_at, stripe_customer_id, billing_provider, apple_expires_at'
+    )
     .eq('id', user.id)
     .single();
 
@@ -36,8 +38,12 @@ export const getAuthUserPayload = async (userId) => {
   }
 
   const subscriptionStatus = liveSubscription?.status || profile?.subscription_status || 'no_subscription';
+  const billingProvider = liveSubscription?.provider || profile?.billing_provider || null;
   const stripeTrialEndSec = liveSubscription?.subscription?.trial_end || null;
   const stripeTrialEndsAt = stripeTrialEndSec ? new Date(stripeTrialEndSec * 1000) : null;
+  const appleExpiresAt = liveSubscription?.subscription?.expiresAt
+    ? new Date(liveSubscription.subscription.expiresAt)
+    : (profile?.apple_expires_at ? new Date(profile.apple_expires_at) : null);
   const now = new Date();
   const subscriptionActive = ['active', 'trialing'].includes(subscriptionStatus);
   const hasAccess = subscriptionActive;
@@ -56,17 +62,27 @@ export const getAuthUserPayload = async (userId) => {
     : guestTrialUsed
       ? 'guest_trial_consumed'
       : 'no_access';
-  const trialDaysRemaining = subscriptionStatus === 'trialing' && stripeTrialEndsAt && stripeTrialEndsAt > now
-    ? Math.ceil((stripeTrialEndsAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
-    : 0;
+
+  let trialDaysRemaining = 0;
+  let trialEndsAt = null;
+  if (subscriptionStatus === 'trialing') {
+    if (billingProvider === 'apple' && appleExpiresAt && appleExpiresAt > now) {
+      trialEndsAt = appleExpiresAt.toISOString();
+      trialDaysRemaining = Math.ceil((appleExpiresAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    } else if (stripeTrialEndsAt && stripeTrialEndsAt > now) {
+      trialEndsAt = stripeTrialEndsAt.toISOString();
+      trialDaysRemaining = Math.ceil((stripeTrialEndsAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    }
+  }
 
   const access = {
     hasAccess,
     reason,
     subscriptionStatus,
+    billingProvider,
     trialActive,
     trialDaysRemaining,
-    trialEndsAt: stripeTrialEndsAt ? stripeTrialEndsAt.toISOString() : null,
+    trialEndsAt,
     guestTrialUsed,
     stripeTrialEligible,
   };

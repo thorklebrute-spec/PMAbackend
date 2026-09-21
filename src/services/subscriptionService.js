@@ -162,22 +162,31 @@ export const createCustomerPortalSession = async (userId) => {
 // Get subscription status
 export const getSubscriptionStatus = async (userId) => {
   try {
+    const { getAppleSubscriptionStatus, isAppleAccessActive } = await import(
+      './appleSubscriptionService.js'
+    );
+
+    const appleStatus = await getAppleSubscriptionStatus(userId);
+    if (appleStatus && isAppleAccessActive(appleStatus)) {
+      return appleStatus;
+    }
+
     // Get user's Stripe customer ID
     const { data: profile, error } = await supabaseAdmin
       .from('user_profiles')
-      .select('stripe_customer_id, subscription_status, subscription_id')
+      .select('stripe_customer_id, subscription_status, subscription_id, billing_provider')
       .eq('id', userId)
       .single();
 
     if (error) {
       if (error.code === 'PGRST116') {
-        return { status: 'no_subscription', subscription: null };
+        return appleStatus || { status: 'no_subscription', subscription: null };
       }
       throw error;
     }
 
     if (!profile?.stripe_customer_id) {
-      return { status: 'no_subscription', subscription: null };
+      return appleStatus || { status: 'no_subscription', subscription: null };
     }
 
     // Get subscriptions from Stripe
@@ -188,23 +197,27 @@ export const getSubscriptionStatus = async (userId) => {
     });
 
     if (subscriptions.data.length === 0) {
-      return { status: 'no_subscription', subscription: null };
+      return appleStatus || { status: 'no_subscription', subscription: null };
     }
 
     const subscription = subscriptions.data[0];
     
-    // Update local subscription status
-    await supabaseAdmin
-      .from('user_profiles')
-      .update({
-        subscription_status: subscription.status,
-        subscription_id: subscription.id,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', userId);
+    // Update local subscription status (do not overwrite active Apple billing)
+    if (profile.billing_provider !== 'apple') {
+      await supabaseAdmin
+        .from('user_profiles')
+        .update({
+          billing_provider: 'stripe',
+          subscription_status: subscription.status,
+          subscription_id: subscription.id,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', userId);
+    }
 
     return {
       status: subscription.status,
+      provider: 'stripe',
       subscription: {
         id: subscription.id,
         status: subscription.status,
