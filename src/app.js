@@ -14,7 +14,7 @@ const app = express();
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-deletion-sweep-token'],
   exposedHeaders: ['Authorization'],
   credentials: true
 }));
@@ -96,12 +96,21 @@ app.use('/policy', express.static(policyDir, { index: 'index.html' }));
  * GET|PUT|POST|DELETE /profile*   Profile + picture
  */
 
+if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  console.warn('SUPABASE_SERVICE_ROLE_KEY is unset. Account deletion and deletion lock checks are unavailable.');
+}
+
+if (!process.env.DELETION_SWEEP_TOKEN) {
+  console.warn('DELETION_SWEEP_TOKEN is unset. Pending storage deletion jobs stay unresolved until the token is set and POST /internal/deletion-storage-sweep is called on a schedule.');
+}
+
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
   if (req.path !== '/webhook/stripe' && req.path !== '/webhook/apple' && req.body && Object.keys(req.body).length > 0) {
     console.log('Request body:', {
       ...req.body,
-      password: req.body.password ? '[REDACTED]' : undefined
+      password: req.body.password ? '[REDACTED]' : undefined,
+      receipt: req.body.receipt ? '[REDACTED]' : undefined,
     });
   }
   next();

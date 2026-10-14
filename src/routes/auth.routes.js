@@ -1,9 +1,17 @@
 import { Router } from 'express';
-import { supabase, supabaseAdmin, signUpWithEmail, signInWithEmail, signInWithGoogle, signInWithAppleIdToken, signOut } from '../config/supabase.js';
+import { supabase, supabaseAdmin, deletionAdmin, hasServiceRoleKey, signUpWithEmail, signInWithEmail, signInWithGoogle, signInWithAppleIdToken, signOut } from '../config/supabase.js';
 import { getAuthUserPayload } from '../services/authService.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { ensureUserProfile, recordGuestTrialStartedAt } from '../services/profileBootstrapService.js';
 import { stripe } from '../config/stripe.js';
+import { createAccountDeletionService } from '../services/accountDeletionService.js';
+
+const accountDeletion = createAccountDeletionService({
+  supabaseAdmin: deletionAdmin,
+  serviceRoleConfigured: hasServiceRoleKey,
+  stripe,
+  sweepToken: () => process.env.DELETION_SWEEP_TOKEN || '',
+});
 
 const router = Router();
 
@@ -420,95 +428,44 @@ router.post('/auth/sync-guest-trial', authenticateToken, async (req, res) => {
   }
 });
 
-const cancelStripeSubscriptions = async (userId) => {
+router.post('/auth/delete-account/status', async (req, res) => {
   try {
-    const { data: profile, error } = await supabaseAdmin
-      .from('user_profiles')
-      .select('stripe_customer_id, subscription_id')
-      .eq('id', userId)
-      .maybeSingle();
-
-    if (error && error.code !== 'PGRST116') {
-      console.warn('Could not load profile before account deletion:', error.message);
-    }
-
-    const subscriptionIds = new Set();
-    if (profile?.subscription_id) {
-      subscriptionIds.add(profile.subscription_id);
-    }
-
-    if (profile?.stripe_customer_id) {
-      const listed = await stripe.subscriptions.list({
-        customer: profile.stripe_customer_id,
-        status: 'all',
-        limit: 20,
-      });
-      for (const subscription of listed.data) {
-        if (!['canceled', 'incomplete_expired'].includes(subscription.status)) {
-          subscriptionIds.add(subscription.id);
-        }
-      }
-    }
-
-    for (const subscriptionId of subscriptionIds) {
-      try {
-        await stripe.subscriptions.cancel(subscriptionId);
-      } catch (stripeError) {
-        const missing = stripeError?.code === 'resource_missing'
-          || stripeError?.raw?.code === 'resource_missing';
-        if (!missing) {
-          console.warn(`Stripe cancel failed for ${subscriptionId}:`, stripeError.message);
-        }
-      }
-    }
+    const forwarded = req.get('x-forwarded-for');
+    const ip = forwarded ? forwarded.split(',')[0].trim() : req.ip;
+    const outcome = await accountDeletion.getStatus(req.body?.receipt, ip);
+    res.status(outcome.httpStatus).json(outcome.body);
   } catch (error) {
-    console.warn('Stripe cancel skipped during account deletion:', error.message);
+    console.error('Deletion status error:', error.message);
+    res.status(200).json({ state: 'unknown' });
   }
-};
-
-const deleteProfileUploads = async (userId) => {
-  try {
-    const folder = `profile-pictures/${userId}`;
-    const { data, error } = await supabaseAdmin.storage
-      .from('user-uploads')
-      .list(folder, { limit: 100 });
-
-    if (error) {
-      console.warn('Could not list profile uploads before account deletion:', error.message);
-      return;
-    }
-
-    const paths = (data || [])
-      .filter((file) => file.name && file.name !== '.emptyFolderPlaceholder')
-      .map((file) => `${folder}/${file.name}`);
-
-    if (!paths.length) return;
-
-    const { error: removeError } = await supabaseAdmin.storage
-      .from('user-uploads')
-      .remove(paths);
-
-    if (removeError) {
-      console.warn('Could not remove profile uploads before account deletion:', removeError.message);
-    }
-  } catch (error) {
-    console.warn('Profile upload cleanup skipped during account deletion:', error.message);
-  }
-};
+});
 
 router.post('/auth/delete-account', authenticateToken, async (req, res) => {
   try {
-    const userId = req.user.id;
-    await cancelStripeSubscriptions(userId);
-    await deleteProfileUploads(userId);
-
-    const { error } = await supabaseAdmin.auth.admin.deleteUser(userId);
-    if (error) throw error;
-
-    res.json({ success: true });
+    const outcome = await accountDeletion.deleteAccount({
+      userId: req.user.id,
+      receipt: req.body?.receipt,
+    });
+    res.status(outcome.httpStatus).json(outcome.body);
   } catch (error) {
-    console.error('Delete account error:', error);
-    res.status(400).json({ error: error.message || 'Failed to delete account' });
+    console.error('Delete account error:', error.message);
+    res.status(503).json({
+      error: 'Account deletion did not finish. You can retry deletion, sign out, or contact support.',
+      code: 'deletion_incomplete',
+    });
+  }
+});
+
+router.post('/internal/deletion-storage-sweep', async (req, res) => {
+  try {
+    const outcome = await accountDeletion.sweepStorage(req.get('x-deletion-sweep-token'));
+    res.status(outcome.httpStatus).json(outcome.body);
+  } catch (error) {
+    console.error('Deletion storage sweep error:', error.message);
+    res.status(503).json({
+      error: 'Storage cleanup sweep failed',
+      code: 'sweep_failed',
+    });
   }
 });
 

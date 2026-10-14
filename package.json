@@ -13,6 +13,8 @@
     "test:rank": "node tests/test-rank-system.js",
     "test:populate": "node tests/test-populate-progress.js",
     "test:stripe": "node tests/test-stripe-integration.js",
+    "test:account-deletion": "node --test tests/account-deletion.test.js",
+    "test:account-deletion:integration": "node tests/account-deletion.integration.mjs",
     "debug:progress": "node tests/debug-progress-issue.js"
   },
   "dependencies": {

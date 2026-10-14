@@ -7,6 +7,7 @@ dotenv.config();
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+export const hasServiceRoleKey = Boolean(supabaseServiceKey);
 
 if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Missing Supabase environment variables');
@@ -21,13 +22,24 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   }
 });
 
-// Service role client for server-side operations (bypasses RLS)
+// Service role client for server-side operations (bypasses RLS).
+// Account deletion must use deletionAdmin. It is null when the service-role
+// key is missing, so deletion cannot silently run with the anon key.
 export const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey || supabaseAnonKey, {
   auth: {
     autoRefreshToken: false,
     persistSession: false
   }
 });
+
+export const deletionAdmin = hasServiceRoleKey
+  ? createClient(supabaseUrl, supabaseServiceKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    })
+  : null;
 
 // Auth helper functions
 export const signUpWithEmail = async (email, password) => {
