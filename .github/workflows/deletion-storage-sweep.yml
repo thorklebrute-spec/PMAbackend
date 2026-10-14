@@ -1,0 +1,36 @@
+
+name: PMA Storage Cleanup
+
+on:
+  schedule:
+    - cron: "7,22,37,52 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pma-storage-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Retry pending profile picture deletions
+        env:
+          SWEEP_TOKEN: ${{ secrets.DELETION_SWEEP_TOKEN }}
+        run: |
+          if [ -z "$SWEEP_TOKEN" ]; then
+            echo "Missing deletion sweep token"
+            exit 1
+          fi
+
+          curl --fail-with-body --silent --show-error \
+            --retry 2 \
+            --max-time 60 \
+            --request POST \
+            --header "x-deletion-sweep-token: $SWEEP_TOKEN" \
+            "https://pmabackend-ubr2.onrender.com/internal/deletion-storage-sweep"
