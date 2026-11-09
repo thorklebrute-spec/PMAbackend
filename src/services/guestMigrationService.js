@@ -263,7 +263,7 @@ const updateProfileFromGuestPayload = async (userId, payload) => {
   }
 
   if (Object.keys(profilePatch).length > 0) {
-    const { error } = await supabaseAdmin.from("user_profiles").upsert([profilePatch], {
+    const { error } = await supabaseAdmin.from("user_profiles").upsert([{ ...profilePatch, id: userId }], {
       onConflict: "id",
     });
     if (error) throw error;
